@@ -24,7 +24,6 @@ def get_db_url():
             env_url = env_url.replace("postgres://", "postgresql://", 1)
         return env_url
     
-    # Intento de lectura desde Streamlit secrets si está disponible
     try:
         import streamlit as st
         if "SUPABASE_DB_URL" in st.secrets:
@@ -66,7 +65,6 @@ def parse_date_safe(val):
     if not val_str or val_str in ['nan', 'None', 'NaT', '']:
         return None
     
-    # Intentar conversión directa con pandas
     try:
         dt = pd.to_datetime(val_str, errors='coerce', dayfirst=True)
         if pd.notna(dt):
@@ -74,7 +72,6 @@ def parse_date_safe(val):
     except Exception:
         pass
     
-    # Manejar textos mal formateados como '20/032025' o '20032025'
     val_clean = val_str.replace('/', '').replace('-', '').replace(' ', '')
     if len(val_clean) == 8 and val_clean.isdigit():
         try:
@@ -111,11 +108,11 @@ def init_db():
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS usuarios (
                     id SERIAL PRIMARY KEY,
-                    username VARCHAR(100) UNIQUE NOT NULL,
-                    password_hash VARCHAR(255) NOT NULL,
-                    nombre_completo VARCHAR(255) NOT NULL,
-                    rol VARCHAR(50) DEFAULT 'operador',
-                    password_plain VARCHAR(255)
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    nombre_completo TEXT NOT NULL,
+                    rol TEXT DEFAULT 'operador',
+                    password_plain TEXT
                 );
             """))
 
@@ -134,14 +131,9 @@ def init_db():
             })
 
         # 2. Catálogos Dinámicos
-        if is_sqlite:
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
-        else:
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre VARCHAR(150) UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre VARCHAR(150) UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre VARCHAR(150) UNIQUE);"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
 
         # Opciones iniciales para SCG
         scg_iniciales = [
@@ -171,7 +163,7 @@ def init_db():
             else:
                 conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
-        # 3. Tabla Principal de Oficios
+        # 3. Tabla Principal de Oficios (Usando TEXT para evitar StringDataRightTruncation)
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oficios (
@@ -195,21 +187,27 @@ def init_db():
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oficios (
                     id SERIAL PRIMARY KEY,
-                    id_registro VARCHAR(100),
-                    estado VARCHAR(255),
-                    municipio VARCHAR(255),
-                    ejido VARCHAR(255),
-                    no_oficio VARCHAR(255),
-                    dgcat VARCHAR(255),
+                    id_registro TEXT,
+                    estado TEXT,
+                    municipio TEXT,
+                    ejido TEXT,
+                    no_oficio TEXT,
+                    dgcat TEXT,
                     fecha_entrega DATE,
                     fecha_recibido DATE,
-                    scg VARCHAR(150),
-                    siscat VARCHAR(150),
-                    tipo_tramite VARCHAR(255),
+                    scg TEXT,
+                    siscat TEXT,
+                    tipo_tramite TEXT,
                     observaciones TEXT,
-                    archivo_escaneado VARCHAR(500)
+                    archivo_escaneado TEXT
                 );
             """))
+            # Asegurar la conversión de columnas existentes
+            for col in ['id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'scg', 'siscat', 'tipo_tramite', 'observaciones', 'archivo_escaneado']:
+                try:
+                    conn.execute(text(f"ALTER TABLE oficios ALTER COLUMN {col} TYPE TEXT;"))
+                except Exception:
+                    pass
 
         # Carga masiva de ubicaciones desde ESTADOS_TOTAL.xlsx
         try:
@@ -222,7 +220,7 @@ def init_db():
                 df_e['NUCLEO AGRARIO'] = df_e['NUCLEO AGRARIO'].astype(str).str.strip()
                 df_e[['ESTADO', 'MUNICIPIO', 'NUCLEO AGRARIO']].to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
 
-        # Carga del histórico de oficios con validación segura de fechas
+        # Carga del histórico de oficios
         cursor_check = conn.execute(text("SELECT COUNT(*) FROM oficios")).fetchone()
         if cursor_check and cursor_check[0] == 0:
             ctrl_file = "CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"
@@ -285,7 +283,6 @@ def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador")
             "p": password
         })
     
-    # Notificación por Correo
     enviar_notificacion_correo("NUEVO USUARIO CREADO", f"Se ha creado la cuenta '{usr_clean}' para {nombre_completo} con el rol {rol.upper()}.")
     return True, f"Usuario '{usr_clean}' creado correctamente."
 
@@ -329,7 +326,6 @@ def enviar_notificacion_correo(asunto, mensaje_texto):
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
-    # Intentar obtener credenciales de las variables de entorno o Streamlit Secrets
     smtp_user = os.environ.get("SMTP_USER", "actmosaicocatastral@gmail.com")
     smtp_pass = os.environ.get("SMTP_PASS", "")
 
@@ -367,18 +363,15 @@ def enviar_notificacion_correo(asunto, mensaje_texto):
 def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     wb = Workbook()
     
-    # HOJA 1: RESUMEN
     ws_sum = wb.active
     ws_sum.title = "Resumen Ejecutivo"
     ws_sum.views.sheetView[0].showGridLines = True
     
-    # HOJA 2: DETALLE
     ws_det = wb.create_sheet(title="Detalle General")
     ws_det.views.sheetView[0].showGridLines = True
 
-    # Estilos de Excel
     font_header = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    fill_header = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid") # Verde Esmeralda
+    fill_header = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
     
     font_title = Font(name="Calibri", size=16, bold=True, color="10B981")
     font_regular = Font(name="Calibri", size=10)
@@ -388,11 +381,9 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     
     zebra_fill = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
 
-    # TITULO INSTITUCIONAL
     ws_sum.cell(row=1, column=1, value="DIRECCIÓN GENERAL DE CATASTRO").font = font_title
     ws_sum.cell(row=2, column=1, value=f"REPORTE DE CONTROL DE GESTIÓN | GENERADO: {datetime.now().strftime('%Y-%m-%d %H:%M')}").font = Font(size=10, italic=True, color="666666")
 
-    # MÉTRICAS GENERALES EN HOJA DE RESUMEN
     ws_sum.cell(row=4, column=1, value="Métrica Directiva").font = font_header
     ws_sum.cell(row=4, column=1).fill = fill_header
     ws_sum.cell(row=4, column=2, value="Valor").font = font_header
@@ -416,7 +407,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
         ws_sum.cell(row=idx, column=1).border = border_box
         ws_sum.cell(row=idx, column=2).border = border_box
 
-    # Llenado de Detalle
     headers = [
         "ID", "ID REGISTRO", "ESTADO", "MUNICIPIO", "EJIDO", 
         "NO. OFICIO", "DGCAT", "FECHA ENTREGA", "FECHA RECIBIDO", 
@@ -451,7 +441,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
 
-    # Ajuste automático de ancho de columnas
     for ws in [ws_sum, ws_det]:
         for col in ws.columns:
             max_len = 0
