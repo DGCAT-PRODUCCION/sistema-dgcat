@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 DB_FILE = "dgcat_gestion.db"
 
 # -----------------------------------------------------------------------------
-# CONEXIÓN OPTIMIZADA CON CACHE
+# CONEXIÓN BASE DE DATOS
 # -----------------------------------------------------------------------------
 def get_db_url():
     env_url = os.environ.get("SUPABASE_DB_URL")
@@ -38,9 +38,6 @@ def get_engine():
     if db_url.startswith("sqlite"):
         return create_engine(db_url, connect_args={"check_same_thread": False})
     return create_engine(db_url, pool_pre_ping=True, pool_size=10, max_overflow=20)
-
-def get_connection():
-    return sqlite3.connect(DB_FILE)
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -72,17 +69,14 @@ def parse_date_safe(val):
     return None
 
 # -----------------------------------------------------------------------------
-# INICIALIZACIÓN DE BASE DE DATOS
+# INICIALIZACIÓN DE ESTRUCTURAS
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=3600)
-def init_db_cached():
-    init_db()
-
 def init_db():
     engine = get_engine()
     is_sqlite = engine.url.drivername == 'sqlite'
 
     with engine.begin() as conn:
+        # 1. Tabla Usuarios
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS usuarios (
@@ -119,6 +113,7 @@ def init_db():
                 "p": "admin123"
             })
 
+        # 2. Catálogos Dinámicos
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
@@ -148,6 +143,7 @@ def init_db():
             else:
                 conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
+        # 3. Tabla Principal de Oficios
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oficios (
@@ -187,21 +183,26 @@ def init_db():
                 );
             """))
 
+        # Carga masiva de ubicaciones
         try:
             conn.execute(text("SELECT 1 FROM cat_ubicaciones LIMIT 1;"))
         except Exception:
             if os.path.exists("ESTADOS_TOTAL.xlsx"):
                 df_e = pd.read_excel("ESTADOS_TOTAL.xlsx")
-                df_e.columns = [c.strip().upper() for c in df_e.columns]
-                df_e['ESTADO'] = df_e['ESTADO'].astype(str).str.strip()
-                df_e['MUNICIPIO'] = df_e['MUNICIPIO'].astype(str).str.strip()
-                if 'NUCLEO AGRARIO' in df_e.columns:
-                    df_e['EJIDO'] = df_e['NUCLEO AGRARIO'].astype(str).str.strip()
-                else:
-                    df_e['EJIDO'] = df_e['EJIDO'].astype(str).str.strip()
+                df_e.columns = [str(c).strip().lower() for c in df_e.columns]
                 
-                df_e[['ESTADO', 'MUNICIPIO', 'EJIDO']].to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
+                col_edo = 'estado' if 'estado' in df_e.columns else df_e.columns[1]
+                col_mun = 'municipio' if 'municipio' in df_e.columns else df_e.columns[3]
+                col_eji = 'nucleo agrario' if 'nucleo agrario' in df_e.columns else ('ejido' if 'ejido' in df_e.columns else df_e.columns[5])
+                
+                df_clean = pd.DataFrame({
+                    'estado': df_e[col_edo].astype(str).str.strip(),
+                    'municipio': df_e[col_mun].astype(str).str.strip(),
+                    'ejido': df_e[col_eji].astype(str).str.strip()
+                })
+                df_clean.to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
 
+        # Carga del histórico
         cursor_check = conn.execute(text("SELECT COUNT(*) FROM oficios")).fetchone()
         if cursor_check and cursor_check[0] == 0:
             ctrl_file = "CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"
@@ -248,7 +249,7 @@ def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador")
     with engine.begin() as conn:
         ex = conn.execute(text("SELECT id FROM usuarios WHERE LOWER(username) = :u"), {"u": usr_clean}).fetchone()
         if ex:
-            return False, f"El usuario '{usr_clean}' ya existe."
+            return False, f"El usuario '{usr_clean}' ya está registrado."
         
         conn.execute(text("""
             INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain)
@@ -261,9 +262,8 @@ def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador")
             "p": password
         })
     
-    mail_sent = enviar_notificacion_correo("NUEVO USUARIO CREADO", f"Se creó la cuenta '{usr_clean}' para {nombre_completo} con el perfil {rol.upper()}.")
-    msg_extra = " (Notificación por correo enviada)" if mail_sent else " (Sin configuración de correo activa)"
-    return True, f"Usuario '{usr_clean}' creado con éxito.{msg_extra}"
+    enviar_notificacion_correo("NUEVO USUARIO CREADO", f"Se creó la cuenta '{usr_clean}' para {nombre_completo} con el perfil {rol.upper()}.")
+    return True, f"Usuario '{usr_clean}' creado correctamente."
 
 def cambiar_password_usuario(username, nueva_password):
     engine = get_engine()
@@ -332,7 +332,7 @@ def enviar_notificacion_correo(asunto, mensaje_texto):
         return False
 
 # -----------------------------------------------------------------------------
-# FORMATO EJECUTIVO DE EXCEL MEJORADO (SIN HORA, ESTILO PREMIUM)
+# REPORTE EJECUTIVO EN EXCEL (FORMATO PROFESIONAL DGCAT)
 # -----------------------------------------------------------------------------
 def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     wb = Workbook()
@@ -344,9 +344,7 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     ws_det = wb.create_sheet(title="Detalle General")
     ws_det.views.sheetView[0].showGridLines = True
 
-    # Paleta de Colores Institucionales
-    COLOR_VERDE = "047857"      # Verde Esmeralda Robusto
-    COLOR_VERDE_CLARO = "D1FAE5"
+    COLOR_VERDE = "047857"
     COLOR_GRIS = "F3F4F6"
     COLOR_TEXTO = "1F2937"
 
@@ -362,7 +360,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     border_thin = Side(border_style="thin", color="D1D5DB")
     border_box = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
-    # 1. ENCABEZADO DE RESUMEN
     ws_sum.cell(row=1, column=1, value="DIRECCIÓN GENERAL DE CATASTRO").font = font_title
     ws_sum.cell(row=2, column=1, value=f"REPORTE DE CONTROL DE GESTIÓN | FECHA: {datetime.now().strftime('%Y-%m-%d')}").font = font_sub
 
@@ -372,8 +369,11 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     ws_sum.cell(row=4, column=2).fill = fill_header
 
     total = len(df)
-    scg_conc = len(df[df['scg'] == 'CONCLUIDO']) if 'scg' in df.columns else 0
-    sis_conc = len(df[df['siscat'].isin(['CONCLUIDO', 'SUBIDO'])]) if 'siscat' in df.columns else 0
+    scg_col = 'scg' if 'scg' in df.columns else ('SCG' if 'SCG' in df.columns else None)
+    sis_col = 'siscat' if 'siscat' in df.columns else ('SISCAT' if 'SISCAT' in df.columns else None)
+
+    scg_conc = len(df[df[scg_col] == 'CONCLUIDO']) if scg_col else 0
+    sis_conc = len(df[df[sis_col].isin(['CONCLUIDO', 'SUBIDO'])]) if sis_col else 0
 
     metricas = [
         ("Total de Oficios Atendidos", total),
@@ -393,7 +393,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
         c1.alignment = Alignment(vertical="center")
         c2.alignment = Alignment(horizontal="center", vertical="center")
 
-    # 2. TABLA DE DETALLE
     headers = [
         "ID", "ID REGISTRO", "ESTADO", "MUNICIPIO", "EJIDO", 
         "NO. OFICIO", "DGCAT", "FECHA ENTREGA", "FECHA RECIBIDO", 
@@ -409,7 +408,10 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
 
     cols_df = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
     
-    for row_idx, row in df.iterrows():
+    df_lower = df.copy()
+    df_lower.columns = [c.lower() for c in df_lower.columns]
+
+    for row_idx, row in df_lower.iterrows():
         row_data = [row.get(c, '') for c in cols_df]
         ws_det.append(row_data)
         
