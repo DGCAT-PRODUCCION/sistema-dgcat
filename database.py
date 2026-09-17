@@ -1,16 +1,26 @@
-import sqlite3
-import hashlib
 import os
 import smtplib
+import hashlib
+from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-DB_FILE = "dgcat_gestion.db"
+import streamlit as st
+from sqlalchemy import create_engine, text
+
+# CONFIGURACIÓN DE CONEXIÓN A BASE DE DATOS (SUPABASE / POSTGRESQL O SQLITE)
+def get_db_url():
+    if "SUPABASE_DB_URL" in st.secrets:
+        return st.secrets["SUPABASE_DB_URL"]
+    return "sqlite:///dgcat_gestion.db"
+
+def get_engine():
+    return create_engine(get_db_url())
 
 # CORREO DESTINO DE NOTIFICACIONES
 CORREO_DESTINO = "actmosaicocatastral@gmail.com"
@@ -20,9 +30,6 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = os.getenv("SMTP_USER", "actmosaicocatastral@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "wycd ksbc mjbc onyw")
-
-def get_connection():
-    return sqlite3.connect(DB_FILE)
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.strip().encode()).hexdigest()
@@ -75,184 +82,160 @@ def enviar_notificacion_correo(nombre_completo, username, rol):
         print(f"⚠️ No se pudo enviar el correo de notificación: {e}")
 
 def init_db():
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_engine()
+    
+    with engine.begin() as conn:
+        # Tabla de usuarios
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                nombre_completo VARCHAR(255) NOT NULL,
+                rol VARCHAR(50) DEFAULT 'operador',
+                password_plain TEXT
+            );
+        """))
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            nombre_completo TEXT NOT NULL,
-            rol TEXT DEFAULT 'operador',
-            password_plain TEXT
-        );
-    """)
+        # Inserción de usuarios iniciales si no existen
+        res_admin = conn.execute(text("SELECT COUNT(*) FROM usuarios WHERE username = 'admin'")).scalar()
+        if res_admin == 0:
+            conn.execute(
+                text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (:u, :p, :n, :r, :pp)"),
+                {"u": "admin", "p": hash_password("admin123"), "n": "Administrador DGCAT", "r": "admin", "pp": "admin123"}
+            )
 
-    cursor.execute("PRAGMA table_info(usuarios);")
-    cols = [col[1] for col in cursor.fetchall()]
-    if "password_plain" not in cols:
-        cursor.execute("ALTER TABLE usuarios ADD COLUMN password_plain TEXT;")
+        res_op = conn.execute(text("SELECT COUNT(*) FROM usuarios WHERE username = 'operador'")).scalar()
+        if res_op == 0:
+            conn.execute(
+                text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (:u, :p, :n, :r, :pp)"),
+                {"u": "operador", "p": hash_password("operador123"), "n": "Capturista PDF DGCAT", "r": "operador", "pp": "operador123"}
+            )
 
-    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE username = 'admin'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute(
-            "INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (?, ?, ?, ?, ?)",
-            ("admin", hash_password("admin123"), "Administrador DGCAT", "admin", "admin123")
-        )
+        # Catálogos
+        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre VARCHAR(100) UNIQUE);"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre VARCHAR(100) UNIQUE);"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre VARCHAR(100) UNIQUE);"))
 
-    cursor.execute("SELECT COUNT(*) FROM usuarios WHERE username = 'operador'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute(
-            "INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (?, ?, ?, ?, ?)",
-            ("operador", hash_password("operador123"), "Capturista PDF DGCAT", "operador", "operador123")
-        )
+        scg_iniciales = ["BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", "SISTEMAS", "SUBIDO"]
+        for item in scg_iniciales:
+            conn.execute(text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": item})
 
-    cursor.execute("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);")
-    cursor.execute("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);")
-    cursor.execute("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);")
+        siscat_iniciales = ["ACUSE", "CONCLUIDO", "CORREO", "SISTEMAS", "SUBIDO"]
+        for item in siscat_iniciales:
+            conn.execute(text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": item})
 
-    scg_iniciales = ["BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", "SISTEMAS", "SUBIDO"]
-    for item in scg_iniciales:
-        cursor.execute("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (?)", (item,))
+        tramites_iniciales = ["CAMBIO DE DESTINO", "CAMBIO DE SUPERFICIE", "DOMINIO PLENO", "ACT. DE MOSAICO", "SENTENCIA"]
+        for item in tramites_iniciales:
+            conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": item})
 
-    siscat_iniciales = ["ACUSE", "CONCLUIDO", "CORREO", "SISTEMAS", "SUBIDO"]
-    for item in siscat_iniciales:
-        cursor.execute("INSERT OR IGNORE INTO cat_siscat (nombre) VALUES (?)", (item,))
+        # Tabla de oficios
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS oficios (
+                id SERIAL PRIMARY KEY,
+                id_registro VARCHAR(50),
+                estado VARCHAR(100),
+                municipio VARCHAR(100),
+                ejido VARCHAR(200),
+                no_oficio VARCHAR(100),
+                dgcat VARCHAR(100),
+                fecha_entrega DATE,
+                fecha_recibido DATE,
+                scg VARCHAR(100),
+                siscat VARCHAR(100),
+                tipo_tramite VARCHAR(100),
+                observaciones TEXT,
+                archivo_escaneado VARCHAR(255)
+            );
+        """))
 
-    tramites_iniciales = ["CAMBIO DE DESTINO", "CAMBIO DE SUPERFICIE", "DOMINIO PLENO", "ACT. DE MOSAICO", "SENTENCIA"]
-    for item in tramites_iniciales:
-        cursor.execute("INSERT OR IGNORE INTO cat_tramite (nombre) VALUES (?)", (item,))
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS oficios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            id_registro TEXT,
-            estado TEXT,
-            municipio TEXT,
-            ejido TEXT,
-            no_oficio TEXT,
-            dgcat TEXT,
-            fecha_entrega DATE,
-            fecha_recibido DATE,
-            scg TEXT,
-            siscat TEXT,
-            tipo_tramite TEXT,
-            observaciones TEXT,
-            archivo_escaneado TEXT
-        );
-    """)
-
-    conn.commit()
-
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='cat_ubicaciones';")
-    if not cursor.fetchone():
-        if os.path.exists("ESTADOS_TOTAL.xlsx"):
+        # Cargar catálogo de ubicaciones
+        res_cat = conn.execute(text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'cat_ubicaciones');")).scalar()
+        if not res_cat and os.path.exists("ESTADOS_TOTAL.xlsx"):
             df_e = pd.read_excel("ESTADOS_TOTAL.xlsx", engine="openpyxl")
             df_e['ESTADO'] = df_e['ESTADO'].astype(str).str.strip()
             df_e['MUNICIPIO'] = df_e['MUNICIPIO'].astype(str).str.strip()
             df_e['NUCLEO AGRARIO'] = df_e['NUCLEO AGRARIO'].astype(str).str.strip()
-            df_e[['ESTADO', 'MUNICIPIO', 'NUCLEO AGRARIO']].to_sql("cat_ubicaciones", conn, if_exists="replace", index=False)
+            df_e[['ESTADO', 'MUNICIPIO', 'NUCLEO AGRARIO']].to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
 
-    cursor.execute("SELECT COUNT(*) FROM oficios;")
-    if cursor.fetchone()[0] == 0:
-        ctrl_file = "CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"
-        if os.path.exists(ctrl_file):
-            df_c = pd.read_excel(ctrl_file, sheet_name="CONTROL_DE_ENTRADA", engine="openpyxl")
+        # Cargar archivo histórico si está vacía la tabla
+        res_of = conn.execute(text("SELECT COUNT(*) FROM oficios")).scalar()
+        if res_of == 0 and os.path.exists("CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"):
+            df_c = pd.read_excel("CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx", sheet_name="CONTROL_DE_ENTRADA", engine="openpyxl")
             df_c.columns = [c.strip() for c in df_c.columns]
             for _, row in df_c.iterrows():
-                cursor.execute("""
+                conn.execute(text("""
                     INSERT INTO oficios (id_registro, estado, municipio, ejido, no_oficio, dgcat, fecha_entrega, fecha_recibido, scg, siscat, observaciones)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    str(row.get('ID', '')),
-                    str(row.get('ESTADO', '')).strip(),
-                    str(row.get('MUNICIPIO', '')).strip(),
-                    str(row.get('EJIDO', '')).strip(),
-                    str(row.get('NO. OFICIO', '')).strip(),
-                    str(row.get('DGCAT', '')).strip(),
-                    str(row.get('FECHA DE ENTREGA', ''))[:10],
-                    str(row.get('FECHA DE RECIBIDO', ''))[:10],
-                    str(row.get('SCG', '')).strip(),
-                    str(row.get('SISCAT', '')).strip(),
-                    str(row.get('OBSERVACIONES', '')).strip()
-                ))
-            conn.commit()
-
-    conn.close()
+                    VALUES (:id_reg, :edo, :mun, :eji, :no_of, :dg, :f_ent, :f_rec, :scg_val, :sis_val, :obs)
+                """), {
+                    "id_reg": str(row.get('ID', '')),
+                    "edo": str(row.get('ESTADO', '')).strip(),
+                    "mun": str(row.get('MUNICIPIO', '')).strip(),
+                    "eji": str(row.get('EJIDO', '')).strip(),
+                    "no_of": str(row.get('NO. OFICIO', '')).strip(),
+                    "dg": str(row.get('DGCAT', '')).strip(),
+                    "f_ent": str(row.get('FECHA DE ENTREGA', ''))[:10] if pd.notna(row.get('FECHA DE ENTREGA')) else None,
+                    "f_rec": str(row.get('FECHA DE RECIBIDO', ''))[:10] if pd.notna(row.get('FECHA DE RECIBIDO')) else None,
+                    "scg_val": str(row.get('SCG', '')).strip(),
+                    "sis_val": str(row.get('SISCAT', '')).strip(),
+                    "obs": str(row.get('OBSERVACIONES', '')).strip()
+                })
 
 def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador"):
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_engine()
     pwd_hash = hash_password(password)
     try:
-        cursor.execute(
-            "INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (?, ?, ?, ?, ?)",
-            (username.strip().lower(), pwd_hash, nombre_completo.strip(), rol, password.strip())
-        )
-        conn.commit()
-        conn.close()
-        
+        with engine.begin() as conn:
+            conn.execute(
+                text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (:u, :p, :n, :r, :pp)"),
+                {"u": username.strip().lower(), "p": pwd_hash, "n": nombre_completo.strip(), "r": rol, "pp": password.strip()}
+            )
         enviar_notificacion_correo(nombre_completo.strip(), username.strip().lower(), rol)
-        
         return True, "Cuenta registrada exitosamente en la base de datos."
-    except sqlite3.IntegrityError:
-        conn.close()
-        return False, "El nombre de usuario ya existe. Elija otro usuario."
+    except Exception as e:
+        return False, f"Error al registrar usuario (Posible duplicado): {e}"
 
 def cambiar_password_usuario(username, nueva_password):
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_engine()
     pwd_hash = hash_password(nueva_password)
     try:
-        cursor.execute("""
-            UPDATE usuarios 
-            SET password_hash = ?, password_plain = ? 
-            WHERE LOWER(username) = LOWER(?)
-        """, (pwd_hash, nueva_password.strip(), username.strip()))
-        conn.commit()
-        conn.close()
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE usuarios SET password_hash = :p, password_plain = :pp WHERE LOWER(username) = LOWER(:u)"),
+                {"p": pwd_hash, "pp": nueva_password.strip(), "u": username.strip()}
+            )
         return True, f"La contraseña de '{username}' fue actualizada correctamente a: {nueva_password.strip()}"
     except Exception as e:
-        conn.close()
         return False, f"Error al cambiar contraseña: {e}"
 
 def eliminar_usuario(username):
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_engine()
     try:
-        cursor.execute("DELETE FROM usuarios WHERE LOWER(username) = LOWER(?)", (username.strip(),))
-        conn.commit()
-        conn.close()
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM usuarios WHERE LOWER(username) = LOWER(:u)"), {"u": username.strip()})
         return True, f"El usuario '{username}' ha sido eliminado correctamente."
     except Exception as e:
-        conn.close()
         return False, f"Error al eliminar usuario: {e}"
 
 def eliminar_oficio(oficio_id):
     """Elimina permanentemente un oficio de la base de datos por su ID."""
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_engine()
     try:
-        cursor.execute("DELETE FROM oficios WHERE id = ?", (oficio_id,))
-        conn.commit()
-        conn.close()
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM oficios WHERE id = :id"), {"id": oficio_id})
         return True, f"El oficio ID #{oficio_id} ha sido eliminado correctamente de la base de datos."
     except Exception as e:
-        conn.close()
         return False, f"Error al eliminar el oficio: {e}"
 
 def verificar_login(username, password):
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_engine()
     pwd_hash = hash_password(password)
-    cursor.execute(
-        "SELECT username, nombre_completo, rol FROM usuarios WHERE LOWER(username) = LOWER(?) AND password_hash = ?", 
-        (username.strip(), pwd_hash)
-    )
-    user = cursor.fetchone()
-    conn.close()
-    return user
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT username, nombre_completo, rol FROM usuarios WHERE LOWER(username) = LOWER(:u) AND password_hash = :p"),
+            {"u": username.strip(), "p": pwd_hash}
+        ).fetchone()
+        return result
 
 def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     wb = openpyxl.Workbook()
