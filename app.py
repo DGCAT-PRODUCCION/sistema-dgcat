@@ -1,10 +1,19 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import os
 import plotly.express as px
 from datetime import date
-from database import init_db, verificar_login, registrar_nuevo_usuario, get_connection, generar_excel_ejecutivo
+from sqlalchemy import text
+from database import (
+    init_db, 
+    verificar_login, 
+    registrar_nuevo_usuario, 
+    get_engine, 
+    generar_excel_ejecutivo,
+    eliminar_oficio,
+    eliminar_usuario,
+    cambiar_password_usuario
+)
 
 # Configuración de página institucional
 st.set_page_config(
@@ -169,7 +178,7 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
     st.rerun()
 
 st.sidebar.markdown("---")
-conn = get_connection()
+engine = get_engine()
 
 # DEFINICIÓN DINÁMICA DE MENÚ SEGÚN EL ROL DEL USUARIO
 if st.session_state["rol"] == "operador":
@@ -201,7 +210,7 @@ if menu == "📈 Dashboard Ejecutivo":
     st.title("🏛️ Tablero de Control Directivo DGCAT")
     st.caption("Monitoreo institucional de oficios de respuesta, bandeja de geógrafos, sistemas y estatus SISCAT.")
     
-    df_raw = pd.read_sql("SELECT * FROM oficios", conn)
+    df_raw = pd.read_sql("SELECT * FROM oficios", engine)
     
     if df_raw.empty:
         st.warning("No hay registros disponibles para generar métricas.")
@@ -237,7 +246,7 @@ if menu == "📈 Dashboard Ejecutivo":
     total_oficios = len(df_filtered)
     concluidos_scg = len(df_filtered[df_filtered['scg'] == 'CONCLUIDO'])
     subidos_siscat = len(df_filtered[df_filtered['siscat'].isin(['CONCLUIDO', 'SUBIDO'])])
-    en_sistemas = len(df_filtered[df_filtered['scg'].str.contains('SISTEMAS', case=False, na=False)])
+    en_sistemas = len(df_filtered[df_filtered['scg'].astype(str).str.contains('SISTEMAS', case=False, na=False)])
     promedio_dias = round(df_filtered['dias_respuesta'].dropna().mean(), 1) if not df_filtered['dias_respuesta'].dropna().empty else 0
     
     pct_scg = round((concluidos_scg / total_oficios * 100), 1) if total_oficios > 0 else 0
@@ -299,11 +308,11 @@ if menu == "📈 Dashboard Ejecutivo":
 # -----------------------------------------------------------------------------
 elif menu == "📄 Carga de Archivo Escaneado (PDF)":
     st.title("📄 Carga Institucional de Expediente PDF (Operador)")
-    st.caption("Todos los campos marcados con (*) son estrictamente OBLIGATORIOS.")
+    st.caption("Todos los campos marcados con (*) son strictly OBLIGATORIOS.")
     
     es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", help="Asigna 'OFICINAS CENTRALES' automáticamente en Estado, Municipio y Ejido.")
 
-    estados_list = pd.read_sql("SELECT DISTINCT TRIM(ESTADO) as ESTADO FROM cat_ubicaciones ORDER BY ESTADO", conn)['ESTADO'].tolist()
+    estados_list = pd.read_sql("SELECT DISTINCT TRIM(\"ESTADO\") as ESTADO FROM cat_ubicaciones ORDER BY ESTADO", engine)['ESTADO'].tolist()
     
     col_u1, col_u2, col_u3 = st.columns(3)
     
@@ -324,14 +333,14 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
             
         muns_list = []
         if estado_sel != "-- Seleccione --":
-            muns_list = pd.read_sql("SELECT DISTINCT TRIM(MUNICIPIO) as MUNICIPIO FROM cat_ubicaciones WHERE TRIM(ESTADO) = ? ORDER BY MUNICIPIO", conn, params=(estado_sel,))['MUNICIPIO'].tolist()
+            muns_list = pd.read_sql("SELECT DISTINCT TRIM(\"MUNICIPIO\") as MUNICIPIO FROM cat_ubicaciones WHERE TRIM(\"ESTADO\") = :e ORDER BY MUNICIPIO", engine, params={"e": estado_sel})['MUNICIPIO'].tolist()
             
         with col_u2:
             municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list)
             
         ejidos_list = []
         if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --":
-            ejidos_list = pd.read_sql("SELECT DISTINCT TRIM(`NUCLEO AGRARIO`) as EJIDO FROM cat_ubicaciones WHERE TRIM(ESTADO) = ? AND TRIM(MUNICIPIO) = ? ORDER BY EJIDO", conn, params=(estado_sel, municipio_sel))['EJIDO'].tolist()
+            ejidos_list = pd.read_sql("SELECT DISTINCT TRIM(\"NUCLEO AGRARIO\") as EJIDO FROM cat_ubicaciones WHERE TRIM(\"ESTADO\") = :e AND TRIM(\"MUNICIPIO\") = :m ORDER BY EJIDO", engine, params={"e": estado_sel, "m": municipio_sel})['EJIDO'].tolist()
             
         with col_u3:
             ejido_sel = st.selectbox("3. Ejido / Núcleo Agrario *", ["-- Seleccione --"] + ejidos_list)
@@ -362,37 +371,38 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                 with open(path_destino, "wb") as f:
                     f.write(archivo_escaneado.getbuffer())
 
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM oficios WHERE UPPER(TRIM(dgcat)) = ?", (dgcat_folio.strip().upper(),))
-                row_ex = cursor.fetchone()
-                
-                if row_ex:
-                    cursor.execute("""
-                        UPDATE oficios 
-                        SET estado = ?, municipio = ?, ejido = ?, archivo_escaneado = ?, observaciones = COALESCE(NULLIF(?, ''), observaciones)
-                        WHERE id = ?
-                    """, (estado_sel, municipio_sel, ejido_sel, nombre_archivo, observaciones_capturista, row_ex[0]))
-                else:
-                    cursor.execute("""
-                        INSERT INTO oficios (estado, municipio, ejido, dgcat, fecha_entrega, scg, siscat, observaciones, archivo_escaneado)
-                        VALUES (?, ?, ?, ?, ?, 'SUBIDO', 'SUBIDO', ?, ?)
-                    """, (estado_sel, municipio_sel, ejido_sel, dgcat_folio.strip().upper(), str(date.today()), observaciones_capturista, nombre_archivo))
-                
-                conn.commit()
+                with engine.begin() as conn:
+                    res = conn.execute(text("SELECT id FROM oficios WHERE UPPER(TRIM(dgcat)) = :dg"), {"dg": dgcat_folio.strip().upper()}).fetchone()
+                    
+                    if res:
+                        conn.execute(text("""
+                            UPDATE oficios 
+                            SET estado = :e, municipio = :m, ejido = :ej, archivo_escaneado = :arch, 
+                                observaciones = COALESCE(NULLIF(:obs, ''), observaciones)
+                            WHERE id = :id
+                        """), {
+                            "e": estado_sel, "m": municipio_sel, "ej": ejido_sel, 
+                            "arch": nombre_archivo, "obs": observaciones_capturista, "id": res[0]
+                        })
+                    else:
+                        conn.execute(text("""
+                            INSERT INTO oficios (estado, municipio, ejido, dgcat, fecha_entrega, scg, siscat, observaciones, archivo_escaneado)
+                            VALUES (:e, :m, :ej, :dg, :fe, 'SUBIDO', 'SUBIDO', :obs, :arch)
+                        """), {
+                            "e": estado_sel, "m": municipio_sel, "ej": ejido_sel, 
+                            "dg": dgcat_folio.strip().upper(), "fe": str(date.today()), 
+                            "obs": observaciones_capturista, "arch": nombre_archivo
+                        })
                 st.success(f"✅ Documento PDF vinculado exitosamente al Folio DGCAT: {dgcat_folio.strip().upper()}")
 
 # -----------------------------------------------------------------------------
-# 3. MÓDULO ADMINISTRADOR / SUPERVISOR (MODIFICAR Y ELIMINAR OFICIOS CON ADVERTENCIA)
+# 3. MÓDULO ADMINISTRADOR / SUPERVISOR
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
     st.caption("Seleccione una opción para Crear Nuevo Registro, Modificar un oficio existente o Eliminarlo de la base de datos.")
 
-    from database import eliminar_oficio
-    from datetime import datetime
-
-    # Cargar todos los oficios registrados para permitir selección/edición/eliminación
-    df_oficios = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", conn)
+    df_oficios = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
 
     modo_accion = st.radio(
         "Modo de Operación:", 
@@ -408,7 +418,6 @@ elif menu == "📝 Registro Completo de Oficios":
             st.warning("No hay registros en la base de datos para editar o eliminar.")
             st.stop()
 
-        # Crear lista de opciones descriptivas: "ID #10 - DGCAT/100/0316/2026 - NO_OFICIO: 123 - JALISCO"
         df_oficios['display_name'] = "ID #" + df_oficios['id'].astype(str) + " | Folio: " + df_oficios['dgcat'].astype(str) + " | Oficio: " + df_oficios['no_oficio'].fillna('').astype(str) + " | Estado: " + df_oficios['estado'].fillna('').astype(str)
         opciones_oficios = df_oficios['display_name'].tolist()
         
@@ -416,7 +425,7 @@ elif menu == "📝 Registro Completo de Oficios":
         id_oficio_seleccionado = int(seleccion.split(" | ")[0].replace("ID #", ""))
         oficio_sel = df_oficios[df_oficios['id'] == id_oficio_seleccionado].iloc[0]
 
-    # SECCIÓN: ELIMINAR REGISTRO CON ADVERTENCIA
+    # ELIMINAR REGISTRO CON ADVERTENCIA
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
         st.error(f"⚠️ **ADVERTENCIA DE SEGURIDAD**: Está a punto de eliminar el oficio **{oficio_sel['dgcat']}** (ID #{oficio_sel['id']}). Esta acción no se puede deshacer.")
         
@@ -437,12 +446,11 @@ elif menu == "📝 Registro Completo de Oficios":
     # FORMULARIO PARA AGREGAR O MODIFICAR
     es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", help="Asigna 'OFICINAS CENTRALES' a Estado, Municipio y Ejido.")
 
-    scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", conn)['nombre'].tolist()
-    siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", conn)['nombre'].tolist()
-    tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", conn)['nombre'].tolist()
-    estados_list = pd.read_sql("SELECT DISTINCT TRIM(ESTADO) as ESTADO FROM cat_ubicaciones ORDER BY ESTADO", conn)['ESTADO'].tolist()
+    scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
+    siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
+    tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
+    estados_list = pd.read_sql("SELECT DISTINCT TRIM(\"ESTADO\") as ESTADO FROM cat_ubicaciones ORDER BY ESTADO", engine)['ESTADO'].tolist()
 
-    # Precargar valores si estamos en modo modificación
     val_id_reg = str(oficio_sel['id_registro']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['id_registro'])) else ""
     val_dgcat = str(oficio_sel['dgcat']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['dgcat'])) else "DGCAT/100/"
     val_no_oficio = str(oficio_sel['no_oficio']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['no_oficio'])) else ""
@@ -470,7 +478,7 @@ elif menu == "📝 Registro Completo de Oficios":
         muns_list = []
         def_mun_idx = 0
         if estado_sel != "-- Seleccione --":
-            muns_list = pd.read_sql("SELECT DISTINCT TRIM(MUNICIPIO) as MUNICIPIO FROM cat_ubicaciones WHERE TRIM(ESTADO) = ? ORDER BY MUNICIPIO", conn, params=(estado_sel,))['MUNICIPIO'].tolist()
+            muns_list = pd.read_sql("SELECT DISTINCT TRIM(\"MUNICIPIO\") as MUNICIPIO FROM cat_ubicaciones WHERE TRIM(\"ESTADO\") = :e ORDER BY MUNICIPIO", engine, params={"e": estado_sel})['MUNICIPIO'].tolist()
             if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['municipio'] in muns_list:
                 def_mun_idx = muns_list.index(oficio_sel['municipio']) + 1
 
@@ -480,7 +488,7 @@ elif menu == "📝 Registro Completo de Oficios":
         ejidos_list = []
         def_ejido_idx = 0
         if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --":
-            ejidos_list = pd.read_sql("SELECT DISTINCT TRIM(`NUCLEO AGRARIO`) as EJIDO FROM cat_ubicaciones WHERE TRIM(ESTADO) = ? AND TRIM(MUNICIPIO) = ? ORDER BY EJIDO", conn, params=(estado_sel, municipio_sel))['EJIDO'].tolist()
+            ejidos_list = pd.read_sql("SELECT DISTINCT TRIM(\"NUCLEO AGRARIO\") as EJIDO FROM cat_ubicaciones WHERE TRIM(\"ESTADO\") = :e AND TRIM(\"MUNICIPIO\") = :m ORDER BY EJIDO", engine, params={"e": estado_sel, "m": municipio_sel})['EJIDO'].tolist()
             if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list:
                 def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1
 
@@ -496,16 +504,15 @@ elif menu == "📝 Registro Completo de Oficios":
         pdf_preexistente = str(oficio_sel['archivo_escaneado'])
 
     if dgcat_folio and dgcat_folio.strip() != "DGCAT/100/":
-        cursor = conn.cursor()
-        cursor.execute("SELECT archivo_escaneado FROM oficios WHERE UPPER(TRIM(dgcat)) = ?", (dgcat_folio.strip().upper(),))
-        result = cursor.fetchone()
-        if result and result[0]:
-            pdf_preexistente = result[0]
-            st.success(f"📎 **PDF Detectado:** Se encontró el expediente `{pdf_preexistente}`.")
-            path_pdf = os.path.join(UPLOADS_DIR, pdf_preexistente)
-            if os.path.exists(path_pdf):
-                with open(path_pdf, "rb") as f:
-                    st.download_button("👁️ Descargar / Ver PDF Adjunto", f, file_name=pdf_preexistente, mime="application/pdf")
+        with engine.connect() as conn:
+            res = conn.execute(text("SELECT archivo_escaneado FROM oficios WHERE UPPER(TRIM(dgcat)) = :dg"), {"dg": dgcat_folio.strip().upper()}).fetchone()
+            if res and res[0]:
+                pdf_preexistente = res[0]
+                st.success(f"📎 **PDF Detectado:** Se encontró el expediente `{pdf_preexistente}`.")
+                path_pdf = os.path.join(UPLOADS_DIR, pdf_preexistente)
+                if os.path.exists(path_pdf):
+                    with open(path_pdf, "rb") as f:
+                        st.download_button("👁️ Descargar / Ver PDF Adjunto", f, file_name=pdf_preexistente, mime="application/pdf")
 
     with st.form("form_oficio_admin", clear_on_submit=False):
         col1, col2 = st.columns(2)
@@ -526,30 +533,38 @@ elif menu == "📝 Registro Completo de Oficios":
         btn_label = "💾 Guardar Nuevo Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios del Registro"
         
         if st.form_submit_button(btn_label, type="primary"):
-            # ADVERTENCIA Y CONFIRMACIÓN EN MODO MODIFICACIÓN
             archivo_final = pdf_preexistente
             if archivo_nuevo is not None:
                 archivo_final = f"{dgcat_folio.strip().replace('/', '_')}_{archivo_nuevo.name}"
                 with open(os.path.join(UPLOADS_DIR, archivo_final), "wb") as f:
                     f.write(archivo_nuevo.getbuffer())
 
-            cursor = conn.cursor()
-            
-            if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
-                cursor.execute("""
-                    UPDATE oficios 
-                    SET id_registro = ?, estado = ?, municipio = ?, ejido = ?, no_oficio = ?, dgcat = ?, fecha_entrega = ?, fecha_recibido = ?, scg = ?, siscat = ?, tipo_tramite = ?, observaciones = ?, archivo_escaneado = ?
-                    WHERE id = ?
-                """, (id_num, estado_sel, municipio_sel, ejido_sel, no_oficio, dgcat_folio.strip().upper(), str(f_entrega), str(f_recibido), scg_sel, siscat_sel, tipo_tramite, observaciones, archivo_final, oficio_sel['id']))
-                conn.commit()
-                st.success(f"✅ ¡El oficio **{dgcat_folio.strip().upper()}** (ID #{oficio_sel['id']}) ha sido MODIFICADO exitosamente!")
-            else:
-                cursor.execute("""
-                    INSERT INTO oficios (id_registro, estado, municipio, ejido, no_oficio, dgcat, fecha_entrega, fecha_recibido, scg, siscat, tipo_tramite, observaciones, archivo_escaneado)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (id_num, estado_sel, municipio_sel, ejido_sel, no_oficio, dgcat_folio.strip().upper(), str(f_entrega), str(f_recibido), scg_sel, siscat_sel, tipo_tramite, observaciones, archivo_final))
-                conn.commit()
-                st.success(f"✅ ¡Nuevo registro guardado con éxito con el Folio DGCAT **{dgcat_folio.strip().upper()}**!")
+            with engine.begin() as conn:
+                if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
+                    conn.execute(text("""
+                        UPDATE oficios 
+                        SET id_registro = :id_r, estado = :e, municipio = :m, ejido = :ej, no_oficio = :no_of, 
+                            dgcat = :dg, fecha_entrega = :f_ent, fecha_recibido = :f_rec, scg = :scg_val, 
+                            siscat = :sis_val, tipo_tramite = :tram, observaciones = :obs, archivo_escaneado = :arch
+                        WHERE id = :id
+                    """), {
+                        "id_r": id_num, "e": estado_sel, "m": municipio_sel, "ej": ejido_sel, "no_of": no_oficio,
+                        "dg": dgcat_folio.strip().upper(), "f_ent": str(f_entrega), "f_rec": str(f_recibido),
+                        "scg_val": scg_sel, "sis_val": siscat_sel, "tram": tipo_tramite, "obs": observaciones,
+                        "arch": archivo_final, "id": oficio_sel['id']
+                    })
+                    st.success(f"✅ ¡El oficio **{dgcat_folio.strip().upper()}** (ID #{oficio_sel['id']}) ha sido MODIFICADO exitosamente!")
+                else:
+                    conn.execute(text("""
+                        INSERT INTO oficios (id_registro, estado, municipio, ejido, no_oficio, dgcat, fecha_entrega, fecha_recibido, scg, siscat, tipo_tramite, observaciones, archivo_escaneado)
+                        VALUES (:id_r, :e, :m, :ej, :no_of, :dg, :f_ent, :f_rec, :scg_val, :sis_val, :tram, :obs, :arch)
+                    """), {
+                        "id_r": id_num, "e": estado_sel, "m": municipio_sel, "ej": ejido_sel, "no_of": no_oficio,
+                        "dg": dgcat_folio.strip().upper(), "f_ent": str(f_entrega), "f_rec": str(f_recibido),
+                        "scg_val": scg_sel, "sis_val": siscat_sel, "tram": tipo_tramite, "obs": observaciones,
+                        "arch": archivo_final
+                    })
+                    st.success(f"✅ ¡Nuevo registro guardado con éxito con el Folio DGCAT **{dgcat_folio.strip().upper()}**!")
 
 # -----------------------------------------------------------------------------
 # 4. CONSULTA Y EXPEDIENTES
@@ -558,7 +573,7 @@ elif menu == "🔍 Consulta y Expedientes":
     st.title("🔍 Consulta de Expedientes DGCAT")
     st.caption("Visualice y descargue el reporte consolidado con formato ejecutivo institucional.")
     
-    df_data = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", conn)
+    df_data = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
     st.dataframe(df_data, use_container_width=True)
     
     st.markdown("---")
@@ -579,45 +594,43 @@ elif menu == "🔍 Consulta y Expedientes":
 elif menu == "⚙️ Gestión de Catálogos":
     st.title("⚙️ Agregar Opciones a Catálogos")
     t1, t2, t3 = st.tabs(["SCG", "SISCAT", "Trámites"])
-    cursor = conn.cursor()
+    
     with t1:
         n_scg = st.text_input("Nueva Opción para SCG")
         if st.button("Guardar Opción SCG") and n_scg:
-            cursor.execute("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (?)", (n_scg.upper(),))
-            conn.commit()
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_scg.upper()})
             st.rerun()
+            
     with t2:
         n_siscat = st.text_input("Nueva Opción para SISCAT")
         if st.button("Guardar Opción SISCAT") and n_siscat:
-            cursor.execute("INSERT OR IGNORE INTO cat_siscat (nombre) VALUES (?)", (n_siscat.upper(),))
-            conn.commit()
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_siscat.upper()})
             st.rerun()
+            
     with t3:
         n_tramite = st.text_input("Nuevo Tipo de Trámite")
         if st.button("Guardar Trámite") and n_tramite:
-            cursor.execute("INSERT OR IGNORE INTO cat_tramite (nombre) VALUES (?)", (n_tramite.upper(),))
-            conn.commit()
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_tramite.upper()})
             st.rerun()
 
 # -----------------------------------------------------------------------------
-# 6. MÓDULO EXCLUSIVO DE ADMINISTRADOR: ALTA DE USUARIOS Y GESTIÓN DE CONTRASEÑAS
+# 6. ALTA DE USUARIOS
 # -----------------------------------------------------------------------------
 elif menu == "👥 Alta de Usuarios":
     st.title("👥 Gestión Completa de Usuarios (Exclusivo Administrador)")
     st.caption("Desde este panel puedes consultar contraseñas, restablecerlas, crear nuevos usuarios o eliminar cuentas.")
 
-    from database import eliminar_usuario, cambiar_password_usuario
-
     col_u1, col_u2 = st.columns([1.1, 1.2])
 
-    # SECCIÓN DE REGISTRO
     with col_u1:
         st.write("### ➕ Registrar Nuevo Usuario")
         reg_nombre = st.text_input("Nombre Completo *", key="admin_reg_nom")
         reg_user = st.text_input("Usuario Único *", key="admin_reg_usr")
         reg_pwd = st.text_input("Contraseña *", key="admin_reg_pwd")
         
-        # AHORA INCLUYE EL NUEVO ROL DE SUPERVISOR
         reg_rol = st.selectbox(
             "Perfil de Usuario *", 
             ["operador", "supervisor", "admin"], 
@@ -636,24 +649,22 @@ elif menu == "👥 Alta de Usuarios":
                 else:
                     st.error(f"❌ {msg}")
 
-    # SECCIÓN DE CONSULTA, CAMBIO Y ELIMINACIÓN DE CONTRASEÑAS
     with col_u2:
         st.write("### 📋 Directorio y Contraseñas de Usuarios")
         df_users = pd.read_sql("""
             SELECT 
-                username as Usuario, 
-                nombre_completo as 'Nombre Completo', 
-                UPPER(rol) as Perfil, 
-                COALESCE(password_plain, '***') as Contraseña 
+                username as "Usuario", 
+                nombre_completo as "Nombre Completo", 
+                UPPER(rol) as "Perfil", 
+                COALESCE(password_plain, '***') as "Contraseña" 
             FROM usuarios
-        """, conn)
+        """, engine)
         st.dataframe(df_users, use_container_width=True)
 
         st.markdown("---")
         
-        # RESTABLECER CONTRASEÑA DE UN USUARIO
         st.write("### 🔑 Cambiar / Restablecer Contraseña")
-        lista_todos_usuarios = df_users['Usuario'].tolist()
+        lista_todos_usuarios = df_users['Usuario'].tolist() if not df_users.empty else []
         usr_cambiar_pwd = st.selectbox("Seleccione el usuario al que desea cambiarle la contraseña:", lista_todos_usuarios)
         nueva_pwd_input = st.text_input("Nueva Contraseña:", key="pwd_reset_input")
         
@@ -670,7 +681,6 @@ elif menu == "👥 Alta de Usuarios":
 
         st.markdown("---")
         
-        # ELIMINAR USUARIO
         st.write("### 🗑️ Eliminar Usuario del Sistema")
         usuarios_para_borrar = [u for u in lista_todos_usuarios if u.lower() != 'admin' and u.lower() != st.session_state['username'].lower()]
 
@@ -685,5 +695,3 @@ elif menu == "👥 Alta de Usuarios":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg_del}")
-
-conn.close()
