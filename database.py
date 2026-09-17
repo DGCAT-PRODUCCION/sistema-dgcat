@@ -1,367 +1,457 @@
 import os
-import smtplib
+import sqlite3
 import hashlib
-from datetime import datetime
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-
 import pandas as pd
-import openpyxl
+from datetime import datetime
+from sqlalchemy import create_engine, text
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-import streamlit as st
-from sqlalchemy import create_engine, text
+DB_FILE = "dgcat_gestion.db"
 
-# CONFIGURACIÓN DE CONEXIÓN A BASE DE DATOS (SUPABASE / POSTGRESQL O SQLITE)
+# -----------------------------------------------------------------------------
+# CONEXIÓN A BASE DE DATOS (Soporte Híbrido: Supabase PostgreSQL / SQLite Local)
+# -----------------------------------------------------------------------------
 def get_db_url():
-    if "SUPABASE_DB_URL" in st.secrets:
-        return st.secrets["SUPABASE_DB_URL"]
-    return "sqlite:///dgcat_gestion.db"
+    """
+    Detecta si existe la variable SUPABASE_DB_URL en las variables de entorno / secrets.
+    Si existe, usa PostgreSQL en Supabase; de lo contrario, usa SQLite local.
+    """
+    env_url = os.environ.get("SUPABASE_DB_URL")
+    if env_url:
+        if env_url.startswith("postgres://"):
+            env_url = env_url.replace("postgres://", "postgresql://", 1)
+        return env_url
+    
+    # Intento de lectura desde Streamlit secrets si está disponible
+    try:
+        import streamlit as st
+        if "SUPABASE_DB_URL" in st.secrets:
+            secret_url = st.secrets["SUPABASE_DB_URL"]
+            if secret_url.startswith("postgres://"):
+                secret_url = secret_url.replace("postgres://", "postgresql://", 1)
+            return secret_url
+    except Exception:
+        pass
+
+    return f"sqlite:///{DB_FILE}"
 
 def get_engine():
-    return create_engine(get_db_url())
+    """Retorna el motor SQLAlchemy configurado para la base de datos."""
+    db_url = get_db_url()
+    if db_url.startswith("sqlite"):
+        return create_engine(db_url, connect_args={"check_same_thread": False})
+    return create_engine(db_url, pool_pre_ping=True)
 
-# CORREO DESTINO DE NOTIFICACIONES
-CORREO_DESTINO = "actmosaicocatastral@gmail.com"
-
-# CONFIGURACIÓN SMTP DE ENVÍO
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USER = os.getenv("SMTP_USER", "actmosaicocatastral@gmail.com")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "wycd ksbc mjbc onyw")
+def get_connection():
+    """Retorna una conexión clásica de SQLite para entornos locales de respaldo."""
+    return sqlite3.connect(DB_FILE)
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.strip().encode()).hexdigest()
+    """Encripta contraseñas usando SHA-256."""
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def enviar_notificacion_correo(nombre_completo, username, rol):
-    """Envía un correo electrónico de notificación a actmosaicocatastral@gmail.com al registrar un usuario."""
-    if not SMTP_PASSWORD:
-        print(f"[NOTIFICACIÓN LOCAL] Nuevo usuario registrado: {nombre_completo} ({username}) - Rol: {rol}")
-        return
-
+# -----------------------------------------------------------------------------
+# LIMPIEZA DE FECHAS SEGURA PARA POSTGRESQL
+# -----------------------------------------------------------------------------
+def parse_date_safe(val):
+    """
+    Limpia y convierte fechas con formatos irregulares como '20/032025' o nulos 
+    a formato estándar ISO YYYY-MM-DD o None para evitar el error InvalidDatetimeFormat.
+    """
+    if pd.isna(val) or val is None:
+        return None
+    val_str = str(val).strip()
+    if not val_str or val_str in ['nan', 'None', 'NaT', '']:
+        return None
+    
+    # Intentar conversión directa con pandas
     try:
-        msg = MIMEMultipart()
-        msg['From'] = SMTP_USER
-        msg['To'] = CORREO_DESTINO
-        msg['Subject'] = f"🔔 Nuevo Registro de Usuario en Sistema DGCAT - {username.upper()}"
+        dt = pd.to_datetime(val_str, errors='coerce', dayfirst=True)
+        if pd.notna(dt):
+            return dt.strftime('%Y-%m-%d')
+    except Exception:
+        pass
+    
+    # Manejar textos mal formateados como '20/032025' o '20032025'
+    val_clean = val_str.replace('/', '').replace('-', '').replace(' ', '')
+    if len(val_clean) == 8 and val_clean.isdigit():
+        try:
+            day = int(val_clean[:2])
+            month = int(val_clean[2:4])
+            year = int(val_clean[4:])
+            return f"{year:04d}-{month:02d}-{day:02d}"
+        except Exception:
+            return None
+            
+    return None
 
-        rol_desc = "Administrador (Acceso Completo)" if rol == "admin" else ("Supervisor / Directivo" if rol == "supervisor" else "Capturista / Operador (PDF y Ubicación)")
-        fecha_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        cuerpo_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333333;">
-            <div style="background-color: #064E3B; padding: 15px; text-align: center; color: white; border-radius: 8px 8px 0 0;">
-                <h2>🏛️ DIRECCIÓN GENERAL DE CATASTRO (DGCAT)</h2>
-                <p style="margin: 0;">Notificación Automática de Registro de Usuario</p>
-            </div>
-            <div style="border: 1px solid #10B981; padding: 20px; border-radius: 0 0 8px 8px; background-color: #F8FAFC;">
-                <p>Se ha registrado un nuevo usuario en la plataforma con el siguiente detalle:</p>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr><td style="padding: 8px; font-weight: bold; width: 35%;">Nombre Completo:</td><td style="padding: 8px;">{nombre_completo}</td></tr>
-                    <tr style="background-color: #F1F5F9;"><td style="padding: 8px; font-weight: bold;">Nombre de Usuario:</td><td style="padding: 8px;"><code>{username}</code></td></tr>
-                    <tr><td style="padding: 8px; font-weight: bold;">Perfil / Rol:</td><td style="padding: 8px;"><strong style="color: #10B981;">{rol_desc}</strong></td></tr>
-                    <tr style="background-color: #F1F5F9;"><td style="padding: 8px; font-weight: bold;">Fecha y Hora:</td><td style="padding: 8px;">{fecha_str}</td></tr>
-                </table>
-                <br>
-                <p style="font-size: 0.85rem; color: #64748B;">Este es un mensaje automático generado por el Sistema de Control de Entrada y Salida de Oficios DGCAT.</p>
-            </div>
-        </body>
-        </html>
-        """
-        msg.attach(MIMEText(cuerpo_html, 'html'))
-
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.sendmail(SMTP_USER, CORREO_DESTINO, msg.as_string())
-        server.quit()
-        print(f"✅ Notificación enviada exitosamente a {CORREO_DESTINO}")
-    except Exception as e:
-        print(f"⚠️ No se pudo enviar el correo de notificación: {e}")
-
+# -----------------------------------------------------------------------------
+# INICIALIZACIÓN Y MIGRACIÓN DE ESTRUCTURAS DE BASE DE DATOS
+# -----------------------------------------------------------------------------
 def init_db():
     engine = get_engine()
-    
+    is_sqlite = engine.url.drivername == 'sqlite'
+
     with engine.begin() as conn:
-        # Tabla de usuarios
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(100) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                nombre_completo VARCHAR(255) NOT NULL,
-                rol VARCHAR(50) DEFAULT 'operador',
-                password_plain TEXT
-            );
-        """))
+        # 1. Tabla de Usuarios
+        if is_sqlite:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    nombre_completo TEXT NOT NULL,
+                    rol TEXT DEFAULT 'operador',
+                    password_plain TEXT
+                );
+            """))
+        else:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(100) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    nombre_completo VARCHAR(255) NOT NULL,
+                    rol VARCHAR(50) DEFAULT 'operador',
+                    password_plain VARCHAR(255)
+                );
+            """))
 
-        # Inserción de usuarios iniciales si no existen
-        res_admin = conn.execute(text("SELECT COUNT(*) FROM usuarios WHERE username = 'admin'")).scalar()
-        if res_admin == 0:
-            conn.execute(
-                text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (:u, :p, :n, :r, :pp)"),
-                {"u": "admin", "p": hash_password("admin123"), "n": "Administrador DGCAT", "r": "admin", "pp": "admin123"}
-            )
+        # Crear usuario Administrador inicial (admin / admin123)
+        res_usr = conn.execute(text("SELECT COUNT(*) FROM usuarios")).fetchone()
+        if res_usr and res_usr[0] == 0:
+            conn.execute(text("""
+                INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain)
+                VALUES (:u, :h, :n, :r, :p)
+            """), {
+                "u": "admin",
+                "h": hash_password("admin123"),
+                "n": "Administrador DGCAT",
+                "r": "admin",
+                "p": "admin123"
+            })
 
-        res_op = conn.execute(text("SELECT COUNT(*) FROM usuarios WHERE username = 'operador'")).scalar()
-        if res_op == 0:
-            conn.execute(
-                text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (:u, :p, :n, :r, :pp)"),
-                {"u": "operador", "p": hash_password("operador123"), "n": "Capturista PDF DGCAT", "r": "operador", "pp": "operador123"}
-            )
+        # 2. Catálogos Dinámicos
+        if is_sqlite:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
+        else:
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre VARCHAR(150) UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre VARCHAR(150) UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre VARCHAR(150) UNIQUE);"))
 
-        # Catálogos
-        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre VARCHAR(100) UNIQUE);"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre VARCHAR(100) UNIQUE);"))
-        conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre VARCHAR(100) UNIQUE);"))
-
-        scg_iniciales = ["BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", "SISTEMAS", "SUBIDO"]
+        # Opciones iniciales para SCG
+        scg_iniciales = [
+            "BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", 
+            "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", 
+            "SISTEMAS", "SUBIDO"
+        ]
         for item in scg_iniciales:
-            conn.execute(text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": item})
+            if is_sqlite:
+                conn.execute(text("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (:n)"), {"n": item})
+            else:
+                conn.execute(text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
+        # Opciones iniciales para SISCAT
         siscat_iniciales = ["ACUSE", "CONCLUIDO", "CORREO", "SISTEMAS", "SUBIDO"]
         for item in siscat_iniciales:
-            conn.execute(text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": item})
+            if is_sqlite:
+                conn.execute(text("INSERT OR IGNORE INTO cat_siscat (nombre) VALUES (:n)"), {"n": item})
+            else:
+                conn.execute(text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
+        # Opciones iniciales para Trámites
         tramites_iniciales = ["CAMBIO DE DESTINO", "CAMBIO DE SUPERFICIE", "DOMINIO PLENO", "ACT. DE MOSAICO", "SENTENCIA"]
         for item in tramites_iniciales:
-            conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": item})
+            if is_sqlite:
+                conn.execute(text("INSERT OR IGNORE INTO cat_tramite (nombre) VALUES (:n)"), {"n": item})
+            else:
+                conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
-        # Tabla de oficios
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS oficios (
-                id SERIAL PRIMARY KEY,
-                id_registro VARCHAR(50),
-                estado VARCHAR(100),
-                municipio VARCHAR(100),
-                ejido VARCHAR(200),
-                no_oficio VARCHAR(100),
-                dgcat VARCHAR(100),
-                fecha_entrega DATE,
-                fecha_recibido DATE,
-                scg VARCHAR(100),
-                siscat VARCHAR(100),
-                tipo_tramite VARCHAR(100),
-                observaciones TEXT,
-                archivo_escaneado VARCHAR(255)
-            );
-        """))
+        # 3. Tabla Principal de Oficios
+        if is_sqlite:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS oficios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id_registro TEXT,
+                    estado TEXT,
+                    municipio TEXT,
+                    ejido TEXT,
+                    no_oficio TEXT,
+                    dgcat TEXT,
+                    fecha_entrega DATE,
+                    fecha_recibido DATE,
+                    scg TEXT,
+                    siscat TEXT,
+                    tipo_tramite TEXT,
+                    observaciones TEXT,
+                    archivo_escaneado TEXT
+                );
+            """))
+        else:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS oficios (
+                    id SERIAL PRIMARY KEY,
+                    id_registro VARCHAR(100),
+                    estado VARCHAR(255),
+                    municipio VARCHAR(255),
+                    ejido VARCHAR(255),
+                    no_oficio VARCHAR(255),
+                    dgcat VARCHAR(255),
+                    fecha_entrega DATE,
+                    fecha_recibido DATE,
+                    scg VARCHAR(150),
+                    siscat VARCHAR(150),
+                    tipo_tramite VARCHAR(255),
+                    observaciones TEXT,
+                    archivo_escaneado VARCHAR(500)
+                );
+            """))
 
-        # Cargar catálogo de ubicaciones
-        res_cat = conn.execute(text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'cat_ubicaciones');")).scalar()
-        if not res_cat and os.path.exists("ESTADOS_TOTAL.xlsx"):
-            df_e = pd.read_excel("ESTADOS_TOTAL.xlsx", engine="openpyxl")
-            df_e['ESTADO'] = df_e['ESTADO'].astype(str).str.strip()
-            df_e['MUNICIPIO'] = df_e['MUNICIPIO'].astype(str).str.strip()
-            df_e['NUCLEO AGRARIO'] = df_e['NUCLEO AGRARIO'].astype(str).str.strip()
-            df_e[['ESTADO', 'MUNICIPIO', 'NUCLEO AGRARIO']].to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
+        # Carga masiva de ubicaciones desde ESTADOS_TOTAL.xlsx
+        try:
+            conn.execute(text("SELECT 1 FROM cat_ubicaciones LIMIT 1;"))
+        except Exception:
+            if os.path.exists("ESTADOS_TOTAL.xlsx"):
+                df_e = pd.read_excel("ESTADOS_TOTAL.xlsx")
+                df_e['ESTADO'] = df_e['ESTADO'].astype(str).str.strip()
+                df_e['MUNICIPIO'] = df_e['MUNICIPIO'].astype(str).str.strip()
+                df_e['NUCLEO AGRARIO'] = df_e['NUCLEO AGRARIO'].astype(str).str.strip()
+                df_e[['ESTADO', 'MUNICIPIO', 'NUCLEO AGRARIO']].to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
 
-        # Cargar archivo histórico si está vacía la tabla
-        res_of = conn.execute(text("SELECT COUNT(*) FROM oficios")).scalar()
-        if res_of == 0 and os.path.exists("CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"):
-            df_c = pd.read_excel("CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx", sheet_name="CONTROL_DE_ENTRADA", engine="openpyxl")
-            df_c.columns = [c.strip() for c in df_c.columns]
-            for _, row in df_c.iterrows():
-                conn.execute(text("""
-                    INSERT INTO oficios (id_registro, estado, municipio, ejido, no_oficio, dgcat, fecha_entrega, fecha_recibido, scg, siscat, observaciones)
-                    VALUES (:id_reg, :edo, :mun, :eji, :no_of, :dg, :f_ent, :f_rec, :scg_val, :sis_val, :obs)
-                """), {
-                    "id_reg": str(row.get('ID', '')),
-                    "edo": str(row.get('ESTADO', '')).strip(),
-                    "mun": str(row.get('MUNICIPIO', '')).strip(),
-                    "eji": str(row.get('EJIDO', '')).strip(),
-                    "no_of": str(row.get('NO. OFICIO', '')).strip(),
-                    "dg": str(row.get('DGCAT', '')).strip(),
-                    "f_ent": str(row.get('FECHA DE ENTREGA', ''))[:10] if pd.notna(row.get('FECHA DE ENTREGA')) else None,
-                    "f_rec": str(row.get('FECHA DE RECIBIDO', ''))[:10] if pd.notna(row.get('FECHA DE RECIBIDO')) else None,
-                    "scg_val": str(row.get('SCG', '')).strip(),
-                    "sis_val": str(row.get('SISCAT', '')).strip(),
-                    "obs": str(row.get('OBSERVACIONES', '')).strip()
-                })
+        # Carga del histórico de oficios con validación segura de fechas
+        cursor_check = conn.execute(text("SELECT COUNT(*) FROM oficios")).fetchone()
+        if cursor_check and cursor_check[0] == 0:
+            ctrl_file = "CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"
+            if os.path.exists(ctrl_file):
+                df_c = pd.read_excel(ctrl_file, sheet_name="CONTROL_DE_ENTRADA")
+                df_c.columns = [c.strip() for c in df_c.columns]
+                
+                for _, row in df_c.iterrows():
+                    f_ent = parse_date_safe(row.get('FECHA DE ENTREGA', ''))
+                    f_rec = parse_date_safe(row.get('FECHA DE RECIBIDO', ''))
+                    
+                    conn.execute(text("""
+                        INSERT INTO oficios (id_registro, estado, municipio, ejido, no_oficio, dgcat, fecha_entrega, fecha_recibido, scg, siscat, observaciones)
+                        VALUES (:id_reg, :edo, :mun, :eji, :no_of, :dg, :f_ent, :f_rec, :scg_val, :sis_val, :obs)
+                    """), {
+                        "id_reg": str(row.get('ID', '')).strip(),
+                        "edo": str(row.get('ESTADO', '')).strip(),
+                        "mun": str(row.get('MUNICIPIO', '')).strip(),
+                        "eji": str(row.get('EJIDO', '')).strip(),
+                        "no_of": str(row.get('NO. OFICIO', '')).strip(),
+                        "dg": str(row.get('DGCAT', '')).strip(),
+                        "f_ent": f_ent,
+                        "f_rec": f_rec,
+                        "scg_val": str(row.get('SCG', '')).strip(),
+                        "sis_val": str(row.get('SISCAT', '')).strip(),
+                        "obs": str(row.get('OBSERVACIONES', '')).strip()
+                    })
 
-def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador"):
-    engine = get_engine()
-    pwd_hash = hash_password(password)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain) VALUES (:u, :p, :n, :r, :pp)"),
-                {"u": username.strip().lower(), "p": pwd_hash, "n": nombre_completo.strip(), "r": rol, "pp": password.strip()}
-            )
-        enviar_notificacion_correo(nombre_completo.strip(), username.strip().lower(), rol)
-        return True, "Cuenta registrada exitosamente en la base de datos."
-    except Exception as e:
-        return False, f"Error al registrar usuario (Posible duplicado): {e}"
-
-def cambiar_password_usuario(username, nueva_password):
-    engine = get_engine()
-    pwd_hash = hash_password(nueva_password)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text("UPDATE usuarios SET password_hash = :p, password_plain = :pp WHERE LOWER(username) = LOWER(:u)"),
-                {"p": pwd_hash, "pp": nueva_password.strip(), "u": username.strip()}
-            )
-        return True, f"La contraseña de '{username}' fue actualizada correctamente a: {nueva_password.strip()}"
-    except Exception as e:
-        return False, f"Error al cambiar contraseña: {e}"
-
-def eliminar_usuario(username):
-    engine = get_engine()
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("DELETE FROM usuarios WHERE LOWER(username) = LOWER(:u)"), {"u": username.strip()})
-        return True, f"El usuario '{username}' ha sido eliminado correctamente."
-    except Exception as e:
-        return False, f"Error al eliminar usuario: {e}"
-
-def eliminar_oficio(oficio_id):
-    """Elimina permanentemente un oficio de la base de datos por su ID."""
-    engine = get_engine()
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("DELETE FROM oficios WHERE id = :id"), {"id": oficio_id})
-        return True, f"El oficio ID #{oficio_id} ha sido eliminado correctamente de la base de datos."
-    except Exception as e:
-        return False, f"Error al eliminar el oficio: {e}"
-
+# -----------------------------------------------------------------------------
+# FUNCIONES DE AUTENTICACIÓN Y GESTIÓN DE USUARIOS
+# -----------------------------------------------------------------------------
 def verificar_login(username, password):
     engine = get_engine()
     pwd_hash = hash_password(password)
     with engine.connect() as conn:
-        result = conn.execute(
-            text("SELECT username, nombre_completo, rol FROM usuarios WHERE LOWER(username) = LOWER(:u) AND password_hash = :p"),
-            {"u": username.strip(), "p": pwd_hash}
+        res = conn.execute(
+            text("SELECT username, nombre_completo, rol FROM usuarios WHERE LOWER(username) = :u AND password_hash = :p"),
+            {"u": username.strip().lower(), "p": pwd_hash}
         ).fetchone()
-        return result
+        return res
 
-def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
-    wb = openpyxl.Workbook()
+def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador"):
+    engine = get_engine()
+    usr_clean = username.strip().lower()
+    pwd_hash = hash_password(password)
     
+    with engine.begin() as conn:
+        ex = conn.execute(text("SELECT id FROM usuarios WHERE LOWER(username) = :u"), {"u": usr_clean}).fetchone()
+        if ex:
+            return False, f"El usuario '{usr_clean}' ya está registrado."
+        
+        conn.execute(text("""
+            INSERT INTO usuarios (username, password_hash, nombre_completo, rol, password_plain)
+            VALUES (:u, :h, :n, :r, :p)
+        """), {
+            "u": usr_clean,
+            "h": pwd_hash,
+            "n": nombre_completo.strip(),
+            "r": rol,
+            "p": password
+        })
+    
+    # Notificación por Correo
+    enviar_notificacion_correo("NUEVO USUARIO CREADO", f"Se ha creado la cuenta '{usr_clean}' para {nombre_completo} con el rol {rol.upper()}.")
+    return True, f"Usuario '{usr_clean}' creado correctamente."
+
+def cambiar_password_usuario(username, nueva_password):
+    engine = get_engine()
+    usr_clean = username.strip().lower()
+    pwd_hash = hash_password(nueva_password)
+    
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE usuarios 
+            SET password_hash = :h, password_plain = :p 
+            WHERE LOWER(username) = :u
+        """), {"h": pwd_hash, "p": nueva_password, "u": usr_clean})
+        
+    return True, f"Contraseña actualizada correctamente para el usuario '{usr_clean}'."
+
+def eliminar_usuario(username):
+    engine = get_engine()
+    usr_clean = username.strip().lower()
+    
+    if usr_clean == "admin":
+        return False, "No se puede eliminar al usuario administrador principal."
+        
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM usuarios WHERE LOWER(username) = :u"), {"u": usr_clean})
+        
+    return True, f"Usuario '{usr_clean}' eliminado del sistema."
+
+def eliminar_oficio(id_oficio):
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM oficios WHERE id = :id"), {"id": id_oficio})
+    return True, f"Oficio ID #{id_oficio} eliminado correctamente."
+
+# -----------------------------------------------------------------------------
+# ENVÍO DE NOTIFICACIONES POR CORREO SMTP
+# -----------------------------------------------------------------------------
+def enviar_notificacion_correo(asunto, mensaje_texto):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    # Intentar obtener credenciales de las variables de entorno o Streamlit Secrets
+    smtp_user = os.environ.get("SMTP_USER", "actmosaicocatastral@gmail.com")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+
+    try:
+        import streamlit as st
+        if "SMTP_PASS" in st.secrets:
+            smtp_pass = st.secrets["SMTP_PASS"]
+        if "SMTP_USER" in st.secrets:
+            smtp_user = st.secrets["SMTP_USER"]
+    except Exception:
+        pass
+
+    if not smtp_pass:
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = smtp_user
+    msg['To'] = "actmosaicocatastral@gmail.com"
+    msg['Subject'] = f"🏛️ DGCAT NOTIFICACIÓN: {asunto}"
+    msg.attach(MIMEText(mensaje_texto, 'plain'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception:
+        return False
+
+# -----------------------------------------------------------------------------
+# GENERACIÓN DE REPORTE EJECUTIVO EN EXCEL CON OPENPYXL
+# -----------------------------------------------------------------------------
+def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
+    wb = Workbook()
+    
+    # HOJA 1: RESUMEN
     ws_sum = wb.active
     ws_sum.title = "Resumen Ejecutivo"
     ws_sum.views.sheetView[0].showGridLines = True
     
-    DARK_GREEN = "064E3B"
-    HEADER_FILL = "0F172A"
-    BORDER_COLOR = "CBD5E1"
-    
-    font_title = Font(name="Calibri", size=15, bold=True, color=DARK_GREEN)
-    font_subtitle = Font(name="Calibri", size=11, italic=True, color="475569")
-    font_header = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    font_kpi_num = Font(name="Calibri", size=20, bold=True, color=DARK_GREEN)
-    font_kpi_lbl = Font(name="Calibri", size=9, bold=True, color="475569")
-    
-    thin_border = Border(
-        left=Side(style='thin', color=BORDER_COLOR),
-        right=Side(style='thin', color=BORDER_COLOR),
-        top=Side(style='thin', color=BORDER_COLOR),
-        bottom=Side(style='thin', color=BORDER_COLOR)
-    )
-    
-    ws_sum["A1"] = "DIRECCIÓN GENERAL DE CATASTRO - REGISTRO AGRARIO NACIONAL"
-    ws_sum["A1"].font = font_title
-    ws_sum["A2"] = "Reporte Ejecutivo de Control de Entrada y Salida de Oficios"
-    ws_sum["A2"].font = font_subtitle
-    
-    total = len(df)
-    scg_concluidos = len(df[df['scg'] == 'CONCLUIDO']) if 'scg' in df.columns else 0
-    siscat_subidos = len(df[df['siscat'].isin(['CONCLUIDO', 'SUBIDO'])]) if 'siscat' in df.columns else 0
-    
-    kpis = [("TOTAL OFICIOS", total), ("CONCLUIDOS SCG", scg_concluidos), ("PROCESADOS SISCAT", siscat_subidos)]
-    
-    col_idx = 1
-    for label, val in kpis:
-        cell_lbl = ws_sum.cell(row=4, column=col_idx, value=label)
-        cell_lbl.font = font_kpi_lbl
-        cell_lbl.alignment = Alignment(horizontal="center", vertical="center")
-        cell_lbl.fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
-        
-        cell_val = ws_sum.cell(row=5, column=col_idx, value=val)
-        cell_val.font = font_kpi_num
-        cell_val.alignment = Alignment(horizontal="center", vertical="center")
-        cell_val.fill = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")
-        
-        ws_sum.merge_cells(start_row=4, start_column=col_idx, end_row=4, end_column=col_idx+1)
-        ws_sum.merge_cells(start_row=5, start_column=col_idx, end_row=5, end_column=col_idx+1)
-        
-        for r in range(4, 6):
-            for c in range(col_idx, col_idx+2):
-                ws_sum.cell(row=r, column=c).border = thin_border
-        col_idx += 3
-        
-    ws_sum.cell(row=8, column=1, value="Estatus por Bandeja SCG").font = Font(name="Calibri", size=12, bold=True, color=DARK_GREEN)
-    ws_sum.cell(row=9, column=1, value="Bandeja").font = font_header
-    ws_sum.cell(row=9, column=1).fill = PatternFill(start_color=HEADER_FILL, end_color=HEADER_FILL, fill_type="solid")
-    ws_sum.cell(row=9, column=2, value="Cantidad").font = font_header
-    ws_sum.cell(row=9, column=2).fill = PatternFill(start_color=HEADER_FILL, end_color=HEADER_FILL, fill_type="solid")
-    
-    r_idx = 10
-    if 'scg' in df.columns and not df.empty:
-        scg_counts = df['scg'].value_counts()
-        for b_name, b_cnt in scg_counts.items():
-            c1 = ws_sum.cell(row=r_idx, column=1, value=str(b_name))
-            c2 = ws_sum.cell(row=r_idx, column=2, value=int(b_cnt))
-            c1.border = thin_border
-            c2.border = thin_border
-            if r_idx % 2 == 0:
-                c1.fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-                c2.fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-            r_idx += 1
-
-    ws_det = wb.create_sheet(title="Detalle de Oficios")
+    # HOJA 2: DETALLE
+    ws_det = wb.create_sheet(title="Detalle General")
     ws_det.views.sheetView[0].showGridLines = True
+
+    # Estilos de Excel
+    font_header = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    fill_header = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid") # Verde Esmeralda
     
-    header_map = {
-        'id': 'ID Reg.',
-        'id_registro': 'ID Numérico',
-        'estado': 'Estado / Entidad',
-        'municipio': 'Municipio',
-        'ejido': 'Ejido / Núcleo Agrario',
-        'no_oficio': 'No. de Oficio',
-        'dgcat': 'Folio DGCAT',
-        'fecha_entrega': 'Fecha Entrega',
-        'fecha_recibido': 'Fecha Recibido',
-        'scg': 'Bandeja SCG',
-        'siscat': 'Estatus SISCAT',
-        'tipo_tramite': 'Tipo de Trámite',
-        'observaciones': 'Observaciones',
-        'archivo_escaneado': 'Expediente PDF'
-    }
-    cols = [c for c in df.columns if c in header_map]
+    font_title = Font(name="Calibri", size=16, bold=True, color="10B981")
+    font_regular = Font(name="Calibri", size=10)
     
-    ws_det.cell(row=1, column=1, value="REGISTRO DETALLADO DE OFICIOS DE RESPUESTA - DGCAT").font = font_title
+    border_thin = Side(border_style="thin", color="CCCCCC")
+    border_box = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
     
-    for c_idx, col_name in enumerate(cols, start=1):
-        cell = ws_det.cell(row=3, column=c_idx, value=header_map[col_name])
+    zebra_fill = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
+
+    # TITULO INSTITUCIONAL
+    ws_sum.cell(row=1, column=1, value="DIRECCIÓN GENERAL DE CATASTRO").font = font_title
+    ws_sum.cell(row=2, column=1, value=f"REPORTE DE CONTROL DE GESTIÓN | GENERADO: {datetime.now().strftime('%Y-%m-%d %H:%M')}").font = Font(size=10, italic=True, color="666666")
+
+    # MÉTRICAS GENERALES EN HOJA DE RESUMEN
+    ws_sum.cell(row=4, column=1, value="Métrica Directiva").font = font_header
+    ws_sum.cell(row=4, column=1).fill = fill_header
+    ws_sum.cell(row=4, column=2, value="Valor").font = font_header
+    ws_sum.cell(row=4, column=2).fill = fill_header
+
+    total = len(df)
+    scg_conc = len(df[df['scg'] == 'CONCLUIDO']) if 'scg' in df.columns else 0
+    sis_conc = len(df[df['siscat'].isin(['CONCLUIDO', 'SUBIDO'])]) if 'siscat' in df.columns else 0
+
+    metricas = [
+        ("Total de Oficios Atendidos", total),
+        ("Oficios Concluidos en SCG", scg_conc),
+        ("% Eficiencia SCG", f"{round((scg_conc/total*100), 1)}%" if total > 0 else "0%"),
+        ("Oficios Procesados SISCAT", sis_conc),
+        ("% Avance SISCAT", f"{round((sis_conc/total*100), 1)}%" if total > 0 else "0%")
+    ]
+
+    for idx, (m, v) in enumerate(metricas, start=5):
+        ws_sum.cell(row=idx, column=1, value=m).font = font_regular
+        ws_sum.cell(row=idx, column=2, value=v).font = Font(bold=True)
+        ws_sum.cell(row=idx, column=1).border = border_box
+        ws_sum.cell(row=idx, column=2).border = border_box
+
+    # Llenado de Detalle
+    headers = [
+        "ID", "ID REGISTRO", "ESTADO", "MUNICIPIO", "EJIDO", 
+        "NO. OFICIO", "DGCAT", "FECHA ENTREGA", "FECHA RECIBIDO", 
+        "SCG", "SISCAT", "TIPO TRÁMITE", "OBSERVACIONES", "ARCHIVO ESCANEADO"
+    ]
+    
+    ws_det.append(headers)
+    for col_num in range(1, len(headers) + 1):
+        cell = ws_det.cell(row=1, column=col_num)
         cell.font = font_header
-        cell.fill = PatternFill(start_color=DARK_GREEN, end_color=DARK_GREEN, fill_type="solid")
+        cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin_border
-        
-    ws_det.row_dimensions[3].height = 26
+
+    cols_df = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
     
-    for r_offset, row in df.iterrows():
-        row_num = r_offset + 4
-        is_zebra = (row_num % 2 == 0)
-        zebra_fill = PatternFill(start_color="F0FDF4", end_color="F0FDF4", fill_type="solid") if is_zebra else PatternFill(fill_type=None)
+    for row_idx, row in df.iterrows():
+        row_data = [row.get(c, '') for c in cols_df]
+        ws_det.append(row_data)
         
-        for c_idx, col_name in enumerate(cols, start=1):
-            val = row[col_name]
-            val_str = "" if pd.isna(val) else str(val).strip()
-            cell = ws_det.cell(row=row_num, column=c_idx, value=val_str)
-            cell.font = Font(name="Calibri", size=10)
-            cell.border = thin_border
+        current_row = row_idx + 2
+        is_zebra = (row_idx % 2 == 1)
+        
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws_det.cell(row=current_row, column=col_idx)
+            cell.font = font_regular
+            cell.border = border_box
             if is_zebra:
                 cell.fill = zebra_fill
             
-            if col_name in ['id', 'id_registro', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat']:
+            if col_idx in [1, 2, 8, 9, 10, 11]:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
 
+    # Ajuste automático de ancho de columnas
     for ws in [ws_sum, ws_det]:
         for col in ws.columns:
             max_len = 0
