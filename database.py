@@ -262,8 +262,176 @@ def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador")
             "p": password
         })
     
-    enviar_notificacion_correo("NUEVO USUARIO CREADO", f"Se creó la cuenta '{usr_clean}' para {nombre_completo} con el perfil {rol.upper()}.")
-    return True, f"Usuario '{usr_clean}' creado correctamente."
+    # Enviar notificación por correo con la plantilla HTML estilizada (Imagen 1)
+    enviar_notificacion_correo_html(
+        nombre_completo=nombre_completo.strip(),
+        username=usr_clean,
+        rol=rol
+    )
+    
+    return True, f"Usuario '{usr_clean}' creado con éxito."
+
+
+def enviar_notificacion_correo_html(nombre_completo, username, rol):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    smtp_user = os.environ.get("SMTP_USER", "actmosaicocatastral@gmail.com")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+
+    try:
+        if "SMTP_PASS" in st.secrets:
+            smtp_pass = st.secrets["SMTP_PASS"]
+        if "SMTP_USER" in st.secrets:
+            smtp_user = st.secrets["SMTP_USER"]
+    except Exception:
+        pass
+
+    if not smtp_pass:
+        return False
+
+    fecha_hora_actual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Mapeo descriptivo del Perfil
+    perfil_desc = {
+        "operador": "Capturista / Operador (Solo Carga PDF)",
+        "supervisor": "Supervisor / Directivo (Acceso Total sin Usuarios)",
+        "admin": "Administrador (Acceso Completo y Contraseñas)"
+    }.get(rol.lower(), rol.upper())
+
+    # PLANTILLA HTML INSTITUCIONAL (Idéntica a la Imagen 1)
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{
+                font-family: 'Segoe UI', Arial, sans-serif;
+                background-color: #f4f6f8;
+                margin: 0;
+                padding: 20px;
+            }}
+            .card {{
+                max-width: 650px;
+                margin: 0 auto;
+                background-color: #ffffff;
+                border: 1px solid #047857;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+            }}
+            .header {{
+                background-color: #047857;
+                color: #ffffff;
+                padding: 24px;
+                text-align: center;
+            }}
+            .header h2 {{
+                margin: 0;
+                font-size: 1.4rem;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }}
+            .header p {{
+                margin: 6px 0 0 0;
+                font-size: 0.88rem;
+                opacity: 0.9;
+            }}
+            .content {{
+                padding: 28px;
+                color: #1f2937;
+            }}
+            .intro {{
+                font-size: 0.95rem;
+                margin-bottom: 20px;
+                color: #374151;
+            }}
+            .table-details {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 24px;
+            }}
+            .table-details td {{
+                padding: 12px 16px;
+                font-size: 0.92rem;
+                border-bottom: 1px solid #f3f4f6;
+            }}
+            .table-details tr:nth-child(odd) {{
+                background-color: #f9fafb;
+            }}
+            .label {{
+                font-weight: 700;
+                color: #111827;
+                width: 35%;
+            }}
+            .value {{
+                color: #047857;
+                font-weight: 600;
+            }}
+            .footer {{
+                padding: 16px 28px;
+                background-color: #f9fafb;
+                border-top: 1px solid #e5e7eb;
+                font-size: 0.82rem;
+                color: #6b7280;
+                text-align: center;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="header">
+                <h2>🏛️ DIRECCIÓN GENERAL DE CATASTRO (DGCAT)</h2>
+                <p>Notificación Automática de Registro de Usuario</p>
+            </div>
+            <div class="content">
+                <p class="intro">Se ha registrado un nuevo usuario en la plataforma con el siguiente detalle:</p>
+                <table class="table-details">
+                    <tr>
+                        <td class="label">Nombre Completo:</td>
+                        <td>{nombre_completo}</td>
+                    </tr>
+                    <tr>
+                        <td class="label">Nombre de Usuario:</td>
+                        <td class="value">{username}</td>
+                    </tr>
+                    <tr>
+                        <td class="label">Perfil / Rol:</td>
+                        <td class="value">{perfil_desc}</td>
+                    </tr>
+                    <tr>
+                        <td class="label">Fecha y Hora:</td>
+                        <td>{fecha_hora_actual}</td>
+                    </tr>
+                </table>
+            </div>
+            <div class="footer">
+                Este es un mensaje automático generado por el Sistema de Control de Entrada y Salida de Oficios DGCAT.
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    msg = MIMEMultipart('alternative')
+    msg['From'] = smtp_user
+    msg['To'] = "actmosaicocatastral@gmail.com"
+    msg['Subject'] = f"🔔 Nuevo Registro de Usuario en Sistema DGCAT - {username.upper()}"
+    
+    # Adjuntar versión HTML
+    msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception:
+        return False
 
 def cambiar_password_usuario(username, nueva_password):
     engine = get_engine()
