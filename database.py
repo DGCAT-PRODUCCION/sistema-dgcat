@@ -183,7 +183,7 @@ def init_db():
                 );
             """))
 
-        # Carga masiva de ubicaciones
+       # Carga masiva de ubicaciones
         try:
             conn.execute(text("SELECT 1 FROM cat_ubicaciones LIMIT 1;"))
         except Exception:
@@ -201,7 +201,7 @@ def init_db():
                     'ejido': df_e[col_eji].astype(str).str.strip()
                 })
                 df_clean.to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
-
+                
         # Carga del histórico
         cursor_check = conn.execute(text("SELECT COUNT(*) FROM oficios")).fetchone()
         if cursor_check and cursor_check[0] == 0:
