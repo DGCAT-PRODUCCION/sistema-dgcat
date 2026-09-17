@@ -150,25 +150,49 @@ else:
 
 menu = st.sidebar.radio("Menú de Opciones", menu_options)
 
-# Helper para cargar ubicaciones compatible PostgreSQL / SQLite
+# Helper blindado para cargar ubicaciones compatible con cualquier nombre de columna en PostgreSQL/SQLite
 @st.cache_data(ttl=600)
+def get_cat_ubicaciones_df():
+    try:
+        df = pd.read_sql("SELECT * FROM cat_ubicaciones", engine)
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        
+        # Mapear nombres de columnas sin importar cómo se llamen en la BD
+        col_edo = [c for c in df.columns if 'estado' in c or 'edo' in c][0] if any('estado' in c or 'edo' in c for c in df.columns) else df.columns[0]
+        col_mun = [c for c in df.columns if 'muni' in c][0] if any('muni' in c for c in df.columns) else df.columns[1]
+        col_eji = [c for c in df.columns if 'nucleo' in c or 'ejido' in c or 'nuc' in c][0] if any('nucleo' in c or 'ejido' in c or 'nuc' in c for c in df.columns) else df.columns[2]
+        
+        res_df = pd.DataFrame({
+            'estado': df[col_edo].astype(str).str.strip(),
+            'municipio': df[col_mun].astype(str).str.strip(),
+            'ejido': df[col_eji].astype(str).str.strip()
+        })
+        return res_df
+    except Exception as e:
+        return pd.DataFrame(columns=['estado', 'municipio', 'ejido'])
+
 def get_estados():
-    df = pd.read_sql("SELECT DISTINCT estado FROM cat_ubicaciones ORDER BY estado", engine)
-    df.columns = [c.lower() for c in df.columns]
+    df = get_cat_ubicaciones_df()
+    if df.empty:
+        return []
     return sorted(list(df['estado'].dropna().unique()))
 
-@st.cache_data(ttl=600)
 def get_municipios(estado):
-    df = pd.read_sql("SELECT DISTINCT municipio FROM cat_ubicaciones WHERE estado = :e ORDER BY municipio", engine, params={"e": estado})
-    df.columns = [c.lower() for c in df.columns]
-    return sorted(list(df['municipio'].dropna().unique()))
+    df = get_cat_ubicaciones_df()
+    if df.empty:
+        return []
+    filtered = df[df['estado'].str.upper() == str(estado).strip().upper()]
+    return sorted(list(filtered['municipio'].dropna().unique()))
 
-@st.cache_data(ttl=600)
 def get_ejidos(estado, municipio):
-    df = pd.read_sql("SELECT DISTINCT ejido FROM cat_ubicaciones WHERE estado = :e AND municipio = :m ORDER BY ejido", engine, params={"e": estado, "m": municipio})
-    df.columns = [c.lower() for c in df.columns]
-    return sorted(list(df['ejido'].dropna().unique()))
-
+    df = get_cat_ubicaciones_df()
+    if df.empty:
+        return []
+    filtered = df[
+        (df['estado'].str.upper() == str(estado).strip().upper()) & 
+        (df['municipio'].str.upper() == str(municipio).strip().upper())
+    ]
+    return sorted(list(filtered['ejido'].dropna().unique()))
 # -----------------------------------------------------------------------------
 # 1. DASHBOARD COMPLETO CON 6 GRAFICAS
 # -----------------------------------------------------------------------------
