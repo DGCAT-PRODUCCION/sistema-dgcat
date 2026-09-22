@@ -309,10 +309,14 @@ if menu == "📈 Dashboard Ejecutivo":
             top_estados, x='Estado', y='Oficios', color='Oficios', text='Oficios', 
             color_continuous_scale='Greens'
         )
-        fig_top_estados.update_traces(textposition='inside', textfont_color='white')
+        fig_top_estados.update_traces(
+            textposition='outside', 
+            textfont=dict(color='#1F2937', size=13, family='Arial Black')
+        )
         fig_top_estados.update_layout(
             xaxis_title="", yaxis_title="Total Oficios", 
-            coloraxis_showscale=False, xaxis_tickangle=-35
+            coloraxis_showscale=False, xaxis_tickangle=-35,
+            ymax=max(top_estados['Oficios']) * 1.15 if not top_estados.empty else None
         )
         st.plotly_chart(fig_top_estados, use_container_width=True)
 
