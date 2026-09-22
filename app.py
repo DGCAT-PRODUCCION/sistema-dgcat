@@ -311,12 +311,11 @@ if menu == "📈 Dashboard Ejecutivo":
         )
         fig_top_estados.update_traces(
             textposition='outside', 
-            textfont=dict(color='#1F2937', size=13, family='Arial Black')
+            textfont=dict(color='#1F2937', size=12)
         )
         fig_top_estados.update_layout(
             xaxis_title="", yaxis_title="Total Oficios", 
-            coloraxis_showscale=False, xaxis_tickangle=-35,
-            ymax=max(top_estados['Oficios']) * 1.15 if not top_estados.empty else None
+            coloraxis_showscale=False, xaxis_tickangle=-35
         )
         st.plotly_chart(fig_top_estados, use_container_width=True)
 
@@ -472,7 +471,6 @@ elif menu == "📝 Registro Completo de Oficios":
 
     scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
-    sistemas_or_options = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist() if 'cat_sistemas_or' in text("SELECT table_name FROM information_schema.tables").text else ["NONE"]
     tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
     estados_list = get_estados()
 
