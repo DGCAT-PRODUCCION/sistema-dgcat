@@ -73,7 +73,6 @@ if "rol" not in st.session_state:
 if "reset_key" not in st.session_state:
     st.session_state["reset_key"] = 0
 
-# PANTALLA LOGIN
 if not st.session_state["authenticated"]:
     st.markdown("""
     <div class="header-box">
@@ -104,7 +103,6 @@ if not st.session_state["authenticated"]:
                     st.error("Credenciales incorrectas. Verifique sus datos.")
     st.stop()
 
-# PANEL PRIVADO
 st.markdown(f"""
 <div class="session-badge">
     <span>🟢 SESIÓN ACTIVA | <strong>{st.session_state['nombre']}</strong> ({st.session_state['username']})</span>
@@ -240,7 +238,6 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
     
-    # METRICAS DIRECTIVAS
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     total_oficios = len(df_filtered)
@@ -261,9 +258,11 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # CONTROL DIGITAL PDF
     st.subheader("📄 Control Digital de Expedientes PDF")
-    has_pdf = df_filtered['archivo_escaneado'].notna() & (df_filtered['archivo_escaneado'] != '') & (df_filtered['archivo_escaneado'] != 'NONE')
+    
+    df_filtered['archivo_escaneado_clean'] = df_filtered['archivo_escaneado'].fillna('').astype(str).str.strip().str.upper()
+    has_pdf = df_filtered['archivo_escaneado_clean'].apply(lambda x: x not in ['', 'NONE', 'NAN', 'NULL'])
+    
     pdf_subidos = len(df_filtered[has_pdf])
     pdf_pendientes = total_oficios - pdf_subidos
     pct_pdf = round((pdf_subidos / total_oficios * 100), 1) if total_oficios > 0 else 0
@@ -287,7 +286,6 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
 
-    # BANDEJA SCG Y SISCAT
     g_col1, g_col2 = st.columns(2)
 
     with g_col1:
@@ -316,7 +314,6 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
 
-    # TOP ESTADOS Y VOLUMETRÍA POR TRÁMITE
     g_col3, g_col4 = st.columns(2)
 
     with g_col3:
@@ -397,7 +394,7 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
 
     st.markdown("---")
     
-    with st.form("form_carga_operador", clear_on_submit=True):
+    with st.form("form_carga_operador", clear_on_submit=False):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/")
@@ -429,7 +426,7 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                 fecha_actual_formatted = date.today().strftime('%Y-%m-%d')
 
                 with engine.begin() as conn:
-                    res = conn.execute(text("SELECT id FROM oficios WHERE UPPER(TRIM(dgcat)) = :dg"), {"dg": dgcat_upper}).fetchone()
+                    res = conn.execute(text("SELECT id FROM oficios WHERE UPPER(REPLACE(TRIM(dgcat), ' ', '')) = UPPER(REPLACE(TRIM(:dg), ' ', ''))"), {"dg": dgcat_upper}).fetchone()
                     if res:
                         conn.execute(text("""
                             UPDATE oficios 
@@ -450,11 +447,11 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                             "obs": obs_upper, "arch": nombre_archivo
                         })
                 st.session_state["reset_key"] += 1
-                st.success(f"✅ Documento PDF subido exitosamente en uploads/ como: {nombre_archivo}")
+                st.success(f"✅ Documento PDF subido exitosamente y vinculado como: {nombre_archivo}")
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# 3. REGISTRO COMPLETO DE OFICIOS (CON PERSISTENCIA Y FORM EN UN SOLO PASO)
+# 3. REGISTRO COMPLETO DE OFICIOS
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -476,7 +473,6 @@ elif menu == "📝 Registro Completo de Oficios":
         id_oficio_seleccionado = int(seleccion.split(" | ")[0].replace("ID #", ""))
         oficio_sel = df_oficios[df_oficios['id'] == id_oficio_seleccionado].iloc[0]
 
-    # MODO ELIMINAR
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
         st.error(f"⚠️ ¿Desea eliminar definitivamente el oficio **{oficio_sel['dgcat']}** (ID #{oficio_sel['id']})?")
         if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary"):
@@ -485,7 +481,6 @@ elif menu == "📝 Registro Completo de Oficios":
             st.rerun()
         st.stop()
 
-    # SELECTORES DE UBICACIÓN DINÁMICOS FUERA DEL FORMULARIO
     es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_centrales_adm_{st.session_state['reset_key']}")
     estados_list = get_estados()
 
@@ -507,7 +502,6 @@ elif menu == "📝 Registro Completo de Oficios":
         def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
         with col_u3: ejido_sel = st.selectbox("3. Ejido", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx, key=f"reg_eji_sel_{st.session_state['reset_key']}")
 
-    # DATOS PRECARGADOS
     scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
     tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
@@ -520,7 +514,6 @@ elif menu == "📝 Registro Completo de Oficios":
     default_f_entrega = parse_date_for_picker(oficio_sel['fecha_entrega']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else date.today()
     default_f_recibido = parse_date_for_picker(oficio_sel['fecha_recibido']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else date.today()
 
-    # FORMULARIO
     with st.form("form_oficio_admin", clear_on_submit=False):
         dgcat_folio = st.text_input("Folio DGCAT", value=val_dgcat)
 
@@ -564,9 +557,9 @@ elif menu == "📝 Registro Completo de Oficios":
                 str_f_entrega = f_entrega.strftime('%Y-%m-%d')
                 str_f_recibido = f_recibido.strftime('%Y-%m-%d')
 
-                archivo_final = ""
+                archivo_final = None
                 if archivo_nuevo is not None:
-                    archivo_final = f"{dgcat_upper.replace('/', '_')}_{archivo_nuevo.name}"
+                    archivo_final = f"{dgcat_upper.replace('/', '_').replace(' ', '')}_{archivo_nuevo.name}"
                     with open(os.path.join(UPLOADS_DIR, archivo_final), "wb") as f:
                         f.write(archivo_nuevo.getbuffer())
 
@@ -577,7 +570,7 @@ elif menu == "📝 Registro Completo de Oficios":
                             SET id_registro = :id_r, estado = :e, municipio = :m, ejido = :ej, no_oficio = :no_of, 
                                 dgcat = :dg, fecha_entrega = :f_ent, fecha_recibido = :f_rec, scg = :scg_val, 
                                 siscat = :sis_val, tipo_tramite = :tram, observaciones = :obs, 
-                                archivo_escaneado = COALESCE(NULLIF(:arch, ''), archivo_escaneado)
+                                archivo_escaneado = COALESCE(:arch, archivo_escaneado)
                             WHERE id = :id
                         """), {
                             "id_r": id_num_upper, "e": estado_upper, "m": municipio_upper, "ej": ejido_upper, "no_of": no_oficio_upper,
@@ -595,10 +588,10 @@ elif menu == "📝 Registro Completo de Oficios":
                             "id_r": id_num_upper, "e": estado_upper, "m": municipio_upper, "ej": ejido_upper, "no_of": no_oficio_upper,
                             "dg": dgcat_upper, "f_ent": str_f_entrega, "f_rec": str_f_recibido,
                             "scg_val": scg_upper, "sis_val": siscat_upper, "tram": tramite_upper, "obs": obs_upper,
-                            "arch": archivo_final
+                            "arch": archivo_final if archivo_final else ""
                         })
                         st.session_state["reset_key"] += 1
-                        st.success("✅ Guardado correctamente. Todos los campos han sido limpiados para la siguiente captura.")
+                        st.success("✅ Guardado correctamente.")
                         st.rerun()
 
 # -----------------------------------------------------------------------------
@@ -622,7 +615,9 @@ elif menu == "🔍 Consulta y Expedientes":
     st.markdown("---")
     st.subheader("📁 Visor y Descarga de Archivos PDF (Almacenados en carpeta uploads/)")
     
-    df_pdfs = df_display[df_display['archivo_escaneado'].notna() & (df_display['archivo_escaneado'] != '') & (df_display['archivo_escaneado'] != 'NONE')]
+    df_display['archivo_escaneado_clean'] = df_display['archivo_escaneado'].fillna('').astype(str).str.strip().str.upper()
+    df_pdfs = df_display[df_display['archivo_escaneado_clean'].apply(lambda x: x not in ['', 'NONE', 'NAN', 'NULL'])]
+
     if not df_pdfs.empty:
         col_pdf1, col_pdf2 = st.columns([2, 1])
         with col_pdf1:
