@@ -152,7 +152,7 @@ else:
 
 menu = st.sidebar.radio("Menú de Opciones", menu_options)
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=1)
 def get_cat_ubicaciones_df():
     try:
         df = pd.read_sql("SELECT * FROM cat_ubicaciones", engine)
@@ -456,7 +456,7 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# 3. REGISTRO COMPLETO DE OFICIOS
+# 3. REGISTRO COMPLETO DE OFICIOS (CON GUARDADO GARANTIZADO)
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -510,6 +510,11 @@ elif menu == "📝 Registro Completo de Oficios":
         def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
         with col_u3: ejido_sel = st.selectbox("3. Ejido", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx, key=f"reg_eji_sel_{st.session_state['reset_key']}")
 
+    # GUARDAR ESTADO SELECCIONADO EN SESSION STATE
+    st.session_state["cur_estado"] = estado_sel
+    st.session_state["cur_municipio"] = municipio_sel
+    st.session_state["cur_ejido"] = ejido_sel
+
     # DATOS PRECARGADOS
     scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
@@ -552,16 +557,20 @@ elif menu == "📝 Registro Completo de Oficios":
 
         btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
-            if not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
+            final_edo = st.session_state.get("cur_estado", "-- Seleccione --")
+            final_mun = st.session_state.get("cur_municipio", "-- Seleccione --")
+            final_eji = st.session_state.get("cur_ejido", "-- Seleccione --")
+
+            if not es_oficinas_centrales_admin and (final_edo == "-- Seleccione --" or final_mun == "-- Seleccione --" or final_eji == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido válidos.")
             else:
                 id_num_upper = id_num.strip().upper()
                 no_oficio_upper = no_oficio.strip().upper()
                 dgcat_upper = dgcat_folio.strip().upper()
                 obs_upper = observaciones.strip().upper()
-                estado_upper = estado_sel.strip().upper()
-                municipio_upper = municipio_sel.strip().upper()
-                ejido_upper = ejido_sel.strip().upper()
+                estado_upper = final_edo.strip().upper()
+                municipio_upper = final_mun.strip().upper()
+                ejido_upper = final_eji.strip().upper()
                 scg_upper = scg_sel.strip().upper()
                 siscat_upper = siscat_sel.strip().upper()
                 tramite_upper = tipo_tramite.strip().upper()
