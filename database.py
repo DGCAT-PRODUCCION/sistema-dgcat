@@ -69,14 +69,14 @@ def parse_date_safe(val):
     return None
 
 # -----------------------------------------------------------------------------
-# INICIALIZACIÓN DE ESTRUCTURAS
+# INICIALIZACIÓN DE ESTRUCTURAS Y LIMPIEZA DE DATOS
 # -----------------------------------------------------------------------------
 def init_db():
     engine = get_engine()
     is_sqlite = engine.url.drivername == 'sqlite'
 
     with engine.begin() as conn:
-        # Tabla Usuarios
+        # 1. Tabla Usuarios
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS usuarios (
@@ -113,7 +113,7 @@ def init_db():
                 "p": "admin123"
             })
 
-        # Catálogos Dinámicos
+        # 2. Catálogos Dinámicos
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
@@ -143,7 +143,7 @@ def init_db():
             else:
                 conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
-        # Tabla Principal de Oficios
+        # 3. Tabla Principal de Oficios
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oficios (
@@ -230,6 +230,13 @@ def init_db():
                         "sis_val": str(row.get('SISCAT', '')).strip(),
                         "obs": str(row.get('OBSERVACIONES', '')).strip()
                     })
+
+        # Saneamiento de basura textual ('None', 'NAN', etc.) a NULL real en archivo_escaneado
+        conn.execute(text("""
+            UPDATE oficios 
+            SET archivo_escaneado = NULL 
+            WHERE TRIM(UPPER(COALESCE(archivo_escaneado, ''))) IN ('', 'NONE', 'NAN', 'NULL', 'UNDEFINED');
+        """))
 
 def verificar_login(username, password):
     engine = get_engine()
