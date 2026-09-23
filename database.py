@@ -154,8 +154,8 @@ def init_db():
                     ejido TEXT,
                     no_oficio TEXT,
                     dgcat TEXT,
-                    fecha_entrega DATE,
-                    fecha_recibido DATE,
+                    fecha_entrega TEXT,
+                    fecha_recibido TEXT,
                     scg TEXT,
                     siscat TEXT,
                     tipo_tramite TEXT,
@@ -173,8 +173,8 @@ def init_db():
                     ejido TEXT,
                     no_oficio TEXT,
                     dgcat TEXT,
-                    fecha_entrega DATE,
-                    fecha_recibido DATE,
+                    fecha_entrega TEXT,
+                    fecha_recibido TEXT,
                     scg TEXT,
                     siscat TEXT,
                     tipo_tramite TEXT,
@@ -183,7 +183,7 @@ def init_db():
                 );
             """))
 
-       # Carga masiva de ubicaciones
+        # Carga masiva de ubicaciones
         try:
             conn.execute(text("SELECT 1 FROM cat_ubicaciones LIMIT 1;"))
         except Exception:
@@ -262,7 +262,6 @@ def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador")
             "p": password
         })
     
-    # Enviar notificación por correo con la plantilla HTML estilizada (Imagen 1)
     enviar_notificacion_correo_html(
         nombre_completo=nombre_completo.strip(),
         username=usr_clean,
@@ -270,7 +269,6 @@ def registrar_nuevo_usuario(username, password, nombre_completo, rol="operador")
     )
     
     return True, f"Usuario '{usr_clean}' creado con éxito."
-
 
 def enviar_notificacion_correo_html(nombre_completo, username, rol):
     import smtplib
@@ -293,14 +291,12 @@ def enviar_notificacion_correo_html(nombre_completo, username, rol):
 
     fecha_hora_actual = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Mapeo descriptivo del Perfil
     perfil_desc = {
         "operador": "Capturista / Operador (Solo Carga PDF)",
         "supervisor": "Supervisor / Directivo (Acceso Total sin Usuarios)",
         "admin": "Administrador (Acceso Completo y Contraseñas)"
     }.get(rol.lower(), rol.upper())
 
-    # PLANTILLA HTML INSTITUCIONAL (Idéntica a la Imagen 1)
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -420,7 +416,6 @@ def enviar_notificacion_correo_html(nombre_completo, username, rol):
     msg['To'] = "actmosaicocatastral@gmail.com"
     msg['Subject'] = f"🔔 Nuevo Registro de Usuario en Sistema DGCAT - {username.upper()}"
     
-    # Adjuntar versión HTML
     msg.attach(MIMEText(html_content, 'html', 'utf-8'))
 
     try:
@@ -461,47 +456,9 @@ def eliminar_usuario(username):
 def eliminar_oficio(id_oficio):
     engine = get_engine()
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM oficios WHERE id = :id"), {"id": id_oficio})
+        conn.execute(text("DELETE FROM oficios WHERE id = :id"), {"id": int(id_oficio)})
     return True, f"Oficio ID #{id_oficio} eliminado."
 
-def enviar_notificacion_correo(asunto, mensaje_texto):
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-
-    smtp_user = os.environ.get("SMTP_USER", "actmosaicocatastral@gmail.com")
-    smtp_pass = os.environ.get("SMTP_PASS", "")
-
-    try:
-        if "SMTP_PASS" in st.secrets:
-            smtp_pass = st.secrets["SMTP_PASS"]
-        if "SMTP_USER" in st.secrets:
-            smtp_user = st.secrets["SMTP_USER"]
-    except Exception:
-        pass
-
-    if not smtp_pass:
-        return False
-
-    msg = MIMEMultipart()
-    msg['From'] = smtp_user
-    msg['To'] = "actmosaicocatastral@gmail.com"
-    msg['Subject'] = f"🏛️ DGCAT NOTIFICACIÓN: {asunto}"
-    msg.attach(MIMEText(mensaje_texto, 'plain'))
-
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.send_message(msg)
-        server.quit()
-        return True
-    except Exception:
-        return False
-
-# -----------------------------------------------------------------------------
-# REPORTE EJECUTIVO EN EXCEL (FORMATO PROFESIONAL DGCAT)
-# -----------------------------------------------------------------------------
 def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     wb = Workbook()
     
