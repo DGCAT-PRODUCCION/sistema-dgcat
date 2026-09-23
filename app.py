@@ -258,14 +258,18 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # -------------------------------------------------------------------------
+    # CONTROL DIGITAL DE EXPEDIENTES PDF (DETECCIÓN ROBUSTA)
+    # -------------------------------------------------------------------------
     st.subheader("📄 Control Digital de Expedientes PDF")
     
-    df_filtered['archivo_escaneado_clean'] = df_filtered['archivo_escaneado'].fillna('').astype(str).str.strip().str.upper()
-    has_pdf = df_filtered['archivo_escaneado_clean'].apply(lambda x: x not in ['', 'NONE', 'NAN', 'NULL'])
+    # Limpieza estricta de la columna
+    df_filtered['archivo_clean'] = df_filtered['archivo_escaneado'].fillna('').astype(str).str.strip().str.upper()
+    has_pdf = df_filtered['archivo_clean'].apply(lambda x: x not in ['', 'NONE', 'NAN', 'NULL', 'UNDEFINED'])
     
-    pdf_subidos = len(df_filtered[has_pdf])
+    pdf_subidos = int(has_pdf.sum())
     pdf_pendientes = total_oficios - pdf_subidos
-    pct_pdf = round((pdf_subidos / total_oficios * 100), 1) if total_oficios > 0 else 0
+    pct_pdf = round((pdf_subidos / total_oficios * 100), 1) if total_oficios > 0 else 0.0
 
     pdf_col1, pdf_col2 = st.columns([1, 2])
     with pdf_col1:
@@ -373,7 +377,7 @@ if menu == "📈 Dashboard Ejecutivo":
 # -----------------------------------------------------------------------------
 elif menu == "📄 Carga de Archivo Escaneado (PDF)":
     st.title("📄 Carga Institucional de Expediente PDF (Operador)")
-    st.caption("Todos los campos marcados con (*) son estrictamente OBLIGATORIOS.")
+    st.caption("Todos los campos marcados con (*) son strictly OBLIGATORIOS.")
     
     es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_op_centrales_{st.session_state['reset_key']}")
 
@@ -426,7 +430,8 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                 fecha_actual_formatted = date.today().strftime('%Y-%m-%d')
 
                 with engine.begin() as conn:
-                    res = conn.execute(text("SELECT id FROM oficios WHERE UPPER(REPLACE(TRIM(dgcat), ' ', '')) = UPPER(REPLACE(TRIM(:dg), ' ', ''))"), {"dg": dgcat_upper}).fetchone()
+                    # Búsqueda ultra flexible sin importar espacios o guiones
+                    res = conn.execute(text("SELECT id FROM oficios WHERE UPPER(REPLACE(REPLACE(TRIM(dgcat), ' ', ''), '/', '')) = UPPER(REPLACE(REPLACE(TRIM(:dg), ' ', ''), '/', ''))"), {"dg": dgcat_upper}).fetchone()
                     if res:
                         conn.execute(text("""
                             UPDATE oficios 
@@ -446,6 +451,8 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                             "dg": dgcat_upper, "fe": fecha_actual_formatted, 
                             "obs": obs_upper, "arch": nombre_archivo
                         })
+                
+                st.cache_data.clear()
                 st.session_state["reset_key"] += 1
                 st.success(f"✅ Documento PDF subido exitosamente y vinculado como: {nombre_archivo}")
                 st.rerun()
@@ -477,6 +484,7 @@ elif menu == "📝 Registro Completo de Oficios":
         st.error(f"⚠️ ¿Desea eliminar definitivamente el oficio **{oficio_sel['dgcat']}** (ID #{oficio_sel['id']})?")
         if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary"):
             eliminar_oficio(int(oficio_sel['id']))
+            st.cache_data.clear()
             st.success("✅ Registro eliminado correctamente.")
             st.rerun()
         st.stop()
@@ -578,6 +586,7 @@ elif menu == "📝 Registro Completo de Oficios":
                             "scg_val": scg_upper, "sis_val": siscat_upper, "tram": tramite_upper, "obs": obs_upper,
                             "arch": archivo_final, "id": int(oficio_sel['id'])
                         })
+                        st.cache_data.clear()
                         st.success("✅ Registro modificado y actualizado correctamente en la base de datos.")
                         st.rerun()
                     else:
@@ -588,8 +597,9 @@ elif menu == "📝 Registro Completo de Oficios":
                             "id_r": id_num_upper, "e": estado_upper, "m": municipio_upper, "ej": ejido_upper, "no_of": no_oficio_upper,
                             "dg": dgcat_upper, "f_ent": str_f_entrega, "f_rec": str_f_recibido,
                             "scg_val": scg_upper, "sis_val": siscat_upper, "tram": tramite_upper, "obs": obs_upper,
-                            "arch": archivo_final if archivo_final else ""
+                            "arch": archivo_final
                         })
+                        st.cache_data.clear()
                         st.session_state["reset_key"] += 1
                         st.success("✅ Guardado correctamente.")
                         st.rerun()
@@ -615,8 +625,8 @@ elif menu == "🔍 Consulta y Expedientes":
     st.markdown("---")
     st.subheader("📁 Visor y Descarga de Archivos PDF (Almacenados en carpeta uploads/)")
     
-    df_display['archivo_escaneado_clean'] = df_display['archivo_escaneado'].fillna('').astype(str).str.strip().str.upper()
-    df_pdfs = df_display[df_display['archivo_escaneado_clean'].apply(lambda x: x not in ['', 'NONE', 'NAN', 'NULL'])]
+    df_display['archivo_clean'] = df_display['archivo_escaneado'].fillna('').astype(str).str.strip().str.upper()
+    df_pdfs = df_display[df_display['archivo_clean'].apply(lambda x: x not in ['', 'NONE', 'NAN', 'NULL', 'UNDEFINED'])]
 
     if not df_pdfs.empty:
         col_pdf1, col_pdf2 = st.columns([2, 1])
@@ -655,6 +665,7 @@ elif menu == "⚙️ Gestión de Catálogos":
         if st.button("Guardar Opción SCG") and n_scg:
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_scg.strip().upper()})
+            st.cache_data.clear()
             st.success("Guardado.")
             st.rerun()
             
@@ -667,6 +678,7 @@ elif menu == "⚙️ Gestión de Catálogos":
         if st.button("Guardar Opción SISCAT") and n_siscat:
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_siscat.strip().upper()})
+            st.cache_data.clear()
             st.success("Guardado.")
             st.rerun()
             
@@ -679,6 +691,7 @@ elif menu == "⚙️ Gestión de Catálogos":
         if st.button("Guardar Trámite") and n_tramite:
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_tramite.strip().upper()})
+            st.cache_data.clear()
             st.success("Guardado.")
             st.rerun()
 
@@ -704,6 +717,7 @@ elif menu == "👥 Alta de Usuarios":
                 else:
                     exito, msg = registrar_nuevo_usuario(reg_user, reg_pwd, reg_nombre, reg_rol)
                     if exito:
+                        st.cache_data.clear()
                         st.success(msg)
                         st.rerun()
                     else:
@@ -730,6 +744,7 @@ elif menu == "👥 Alta de Usuarios":
         if st.button("🔄 Actualizar Contraseña"):
             if nueva_pwd_input and usr_cambiar_pwd:
                 exito_pwd, msg_pwd = cambiar_password_usuario(usr_cambiar_pwd, nueva_pwd_input)
+                st.cache_data.clear()
                 st.success(msg_pwd)
                 st.rerun()
 
@@ -739,5 +754,6 @@ elif menu == "👥 Alta de Usuarios":
             user_a_borrar = st.selectbox("Usuario a eliminar:", usuarios_para_borrar)
             if st.button("❌ Confirmar Eliminación"):
                 eliminar_usuario(user_a_borrar)
+                st.cache_data.clear()
                 st.success("Usuario eliminado.")
                 st.rerun()
