@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 DB_FILE = "dgcat_gestion.db"
 
 # -----------------------------------------------------------------------------
-# CONEXIÓN BASE DE DATOS
+# CONEXIÓN A BASE DE DATOS
 # -----------------------------------------------------------------------------
 def get_db_url():
     env_url = os.environ.get("SUPABASE_DB_URL")
@@ -76,7 +76,7 @@ def init_db():
     is_sqlite = engine.url.drivername == 'sqlite'
 
     with engine.begin() as conn:
-        # 1. Tabla Usuarios
+        # Tabla Usuarios
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS usuarios (
@@ -113,7 +113,7 @@ def init_db():
                 "p": "admin123"
             })
 
-        # 2. Catálogos Dinámicos
+        # Catálogos Dinámicos
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
@@ -143,7 +143,7 @@ def init_db():
             else:
                 conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
-        # 3. Tabla Principal de Oficios
+        # Tabla Principal de Oficios
         if is_sqlite:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oficios (
@@ -183,7 +183,7 @@ def init_db():
                 );
             """))
 
-        # Carga masiva de ubicaciones
+        # Carga de catálogos de ubicación
         try:
             conn.execute(text("SELECT 1 FROM cat_ubicaciones LIMIT 1;"))
         except Exception:
@@ -201,8 +201,8 @@ def init_db():
                     'ejido': df_e[col_eji].astype(str).str.strip()
                 })
                 df_clean.to_sql("cat_ubicaciones", engine, if_exists="replace", index=False)
-                
-        # Carga del histórico
+
+        # Carga del histórico de datos
         cursor_check = conn.execute(text("SELECT COUNT(*) FROM oficios")).fetchone()
         if cursor_check and cursor_check[0] == 0:
             ctrl_file = "CONTROL DE ENTRADA Y SALIDA DE LOS OFICIOS DE RESPUESTA.xlsx"
@@ -303,77 +303,19 @@ def enviar_notificacion_correo_html(nombre_completo, username, rol):
     <head>
         <meta charset="utf-8">
         <style>
-            body {{
-                font-family: 'Segoe UI', Arial, sans-serif;
-                background-color: #f4f6f8;
-                margin: 0;
-                padding: 20px;
-            }}
-            .card {{
-                max-width: 650px;
-                margin: 0 auto;
-                background-color: #ffffff;
-                border: 1px solid #047857;
-                border-radius: 8px;
-                overflow: hidden;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-            }}
-            .header {{
-                background-color: #047857;
-                color: #ffffff;
-                padding: 24px;
-                text-align: center;
-            }}
-            .header h2 {{
-                margin: 0;
-                font-size: 1.4rem;
-                font-weight: 700;
-                letter-spacing: 0.5px;
-            }}
-            .header p {{
-                margin: 6px 0 0 0;
-                font-size: 0.88rem;
-                opacity: 0.9;
-            }}
-            .content {{
-                padding: 28px;
-                color: #1f2937;
-            }}
-            .intro {{
-                font-size: 0.95rem;
-                margin-bottom: 20px;
-                color: #374151;
-            }}
-            .table-details {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 24px;
-            }}
-            .table-details td {{
-                padding: 12px 16px;
-                font-size: 0.92rem;
-                border-bottom: 1px solid #f3f4f6;
-            }}
-            .table-details tr:nth-child(odd) {{
-                background-color: #f9fafb;
-            }}
-            .label {{
-                font-weight: 700;
-                color: #111827;
-                width: 35%;
-            }}
-            .value {{
-                color: #047857;
-                font-weight: 600;
-            }}
-            .footer {{
-                padding: 16px 28px;
-                background-color: #f9fafb;
-                border-top: 1px solid #e5e7eb;
-                font-size: 0.82rem;
-                color: #6b7280;
-                text-align: center;
-            }}
+            body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f6f8; margin: 0; padding: 20px; }}
+            .card {{ max-width: 650px; margin: 0 auto; background-color: #ffffff; border: 1px solid #047857; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }}
+            .header {{ background-color: #047857; color: #ffffff; padding: 24px; text-align: center; }}
+            .header h2 {{ margin: 0; font-size: 1.4rem; font-weight: 700; letter-spacing: 0.5px; }}
+            .header p {{ margin: 6px 0 0 0; font-size: 0.88rem; opacity: 0.9; }}
+            .content {{ padding: 28px; color: #1f2937; }}
+            .intro {{ font-size: 0.95rem; margin-bottom: 20px; color: #374151; }}
+            .table-details {{ width: 100%; border-collapse: collapse; margin-bottom: 24px; }}
+            .table-details td {{ padding: 12px 16px; font-size: 0.92rem; border-bottom: 1px solid #f3f4f6; }}
+            .table-details tr:nth-child(odd) {{ background-color: #f9fafb; }}
+            .label {{ font-weight: 700; color: #111827; width: 35%; }}
+            .value {{ color: #047857; font-weight: 600; }}
+            .footer {{ padding: 16px 28px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; font-size: 0.82rem; color: #6b7280; text-align: center; }}
         </style>
     </head>
     <body>
@@ -385,27 +327,13 @@ def enviar_notificacion_correo_html(nombre_completo, username, rol):
             <div class="content">
                 <p class="intro">Se ha registrado un nuevo usuario en la plataforma con el siguiente detalle:</p>
                 <table class="table-details">
-                    <tr>
-                        <td class="label">Nombre Completo:</td>
-                        <td>{nombre_completo}</td>
-                    </tr>
-                    <tr>
-                        <td class="label">Nombre de Usuario:</td>
-                        <td class="value">{username}</td>
-                    </tr>
-                    <tr>
-                        <td class="label">Perfil / Rol:</td>
-                        <td class="value">{perfil_desc}</td>
-                    </tr>
-                    <tr>
-                        <td class="label">Fecha y Hora:</td>
-                        <td>{fecha_hora_actual}</td>
-                    </tr>
+                    <tr><td class="label">Nombre Completo:</td><td>{nombre_completo}</td></tr>
+                    <tr><td class="label">Nombre de Usuario:</td><td class="value">{username}</td></tr>
+                    <tr><td class="label">Perfil / Rol:</td><td class="value">{perfil_desc}</td></tr>
+                    <tr><td class="label">Fecha y Hora:</td><td>{fecha_hora_actual}</td></tr>
                 </table>
             </div>
-            <div class="footer">
-                Este es un mensaje automático generado por el Sistema de Control de Entrada y Salida de Oficios DGCAT.
-            </div>
+            <div class="footer">Este es un mensaje automático generado por el Sistema DGCAT.</div>
         </div>
     </body>
     </html>
@@ -415,7 +343,6 @@ def enviar_notificacion_correo_html(nombre_completo, username, rol):
     msg['From'] = smtp_user
     msg['To'] = "actmosaicocatastral@gmail.com"
     msg['Subject'] = f"🔔 Nuevo Registro de Usuario en Sistema DGCAT - {username.upper()}"
-    
     msg.attach(MIMEText(html_content, 'html', 'utf-8'))
 
     try:
