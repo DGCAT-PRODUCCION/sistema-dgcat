@@ -152,7 +152,6 @@ else:
 
 menu = st.sidebar.radio("Menú de Opciones", menu_options)
 
-@st.cache_data(ttl=1)
 def get_cat_ubicaciones_df():
     try:
         df = pd.read_sql("SELECT * FROM cat_ubicaciones", engine)
@@ -215,7 +214,7 @@ if menu == "📈 Dashboard Ejecutivo":
     st.title("🏛️ Tablero de Control Directivo DGCAT")
     st.caption("Monitoreo institucional de oficios de respuesta, expedientes PDF digitalizados, SCG y SISCAT.")
     
-    df_raw = pd.read_sql("SELECT * FROM oficios", engine)
+    df_raw = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
     df_raw.columns = [c.lower() for c in df_raw.columns]
     
     if df_raw.empty:
@@ -427,7 +426,7 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                 with open(os.path.join(UPLOADS_DIR, nombre_archivo), "wb") as f:
                     f.write(archivo_escaneado.getbuffer())
 
-                fecha_actual_formatted = date.today().strftime('%d/%m/%Y')
+                fecha_actual_formatted = date.today().strftime('%Y-%m-%d')
 
                 with engine.begin() as conn:
                     res = conn.execute(text("SELECT id FROM oficios WHERE UPPER(TRIM(dgcat)) = :dg"), {"dg": dgcat_upper}).fetchone()
@@ -450,13 +449,12 @@ elif menu == "📄 Carga de Archivo Escaneado (PDF)":
                             "dg": dgcat_upper, "fe": fecha_actual_formatted, 
                             "obs": obs_upper, "arch": nombre_archivo
                         })
-                st.cache_data.clear()
                 st.session_state["reset_key"] += 1
                 st.success(f"✅ Documento PDF subido exitosamente en uploads/ como: {nombre_archivo}")
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# 3. REGISTRO COMPLETO DE OFICIOS (CON GUARDADO GARANTIZADO)
+# 3. REGISTRO COMPLETO DE OFICIOS (CON PERSISTENCIA Y FORM EN UN SOLO PASO)
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -483,12 +481,11 @@ elif menu == "📝 Registro Completo de Oficios":
         st.error(f"⚠️ ¿Desea eliminar definitivamente el oficio **{oficio_sel['dgcat']}** (ID #{oficio_sel['id']})?")
         if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary"):
             eliminar_oficio(int(oficio_sel['id']))
-            st.cache_data.clear()
             st.success("✅ Registro eliminado correctamente.")
             st.rerun()
         st.stop()
 
-    # SELECTORES DE UBICACIÓN DINÁMICOS
+    # SELECTORES DE UBICACIÓN DINÁMICOS FUERA DEL FORMULARIO
     es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_centrales_adm_{st.session_state['reset_key']}")
     estados_list = get_estados()
 
@@ -510,11 +507,6 @@ elif menu == "📝 Registro Completo de Oficios":
         def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
         with col_u3: ejido_sel = st.selectbox("3. Ejido", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx, key=f"reg_eji_sel_{st.session_state['reset_key']}")
 
-    # GUARDAR ESTADO SELECCIONADO EN SESSION STATE
-    st.session_state["cur_estado"] = estado_sel
-    st.session_state["cur_municipio"] = municipio_sel
-    st.session_state["cur_ejido"] = ejido_sel
-
     # DATOS PRECARGADOS
     scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
@@ -528,10 +520,8 @@ elif menu == "📝 Registro Completo de Oficios":
     default_f_entrega = parse_date_for_picker(oficio_sel['fecha_entrega']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else date.today()
     default_f_recibido = parse_date_for_picker(oficio_sel['fecha_recibido']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else date.today()
 
-    limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
-
-    # FORMULARIO DE CAPTURA / EDICIÓN
-    with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
+    # FORMULARIO
+    with st.form("form_oficio_admin", clear_on_submit=False):
         dgcat_folio = st.text_input("Folio DGCAT", value=val_dgcat)
 
         col1, col2 = st.columns(2)
@@ -557,26 +547,22 @@ elif menu == "📝 Registro Completo de Oficios":
 
         btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
-            final_edo = st.session_state.get("cur_estado", "-- Seleccione --")
-            final_mun = st.session_state.get("cur_municipio", "-- Seleccione --")
-            final_eji = st.session_state.get("cur_ejido", "-- Seleccione --")
-
-            if not es_oficinas_centrales_admin and (final_edo == "-- Seleccione --" or final_mun == "-- Seleccione --" or final_eji == "-- Seleccione --"):
+            if not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido válidos.")
             else:
                 id_num_upper = id_num.strip().upper()
                 no_oficio_upper = no_oficio.strip().upper()
                 dgcat_upper = dgcat_folio.strip().upper()
                 obs_upper = observaciones.strip().upper()
-                estado_upper = final_edo.strip().upper()
-                municipio_upper = final_mun.strip().upper()
-                ejido_upper = final_eji.strip().upper()
+                estado_upper = estado_sel.strip().upper()
+                municipio_upper = municipio_sel.strip().upper()
+                ejido_upper = ejido_sel.strip().upper()
                 scg_upper = scg_sel.strip().upper()
                 siscat_upper = siscat_sel.strip().upper()
                 tramite_upper = tipo_tramite.strip().upper()
 
-                str_f_entrega = f_entrega.strftime('%d/%m/%Y')
-                str_f_recibido = f_recibido.strftime('%d/%m/%Y')
+                str_f_entrega = f_entrega.strftime('%Y-%m-%d')
+                str_f_recibido = f_recibido.strftime('%Y-%m-%d')
 
                 archivo_final = ""
                 if archivo_nuevo is not None:
@@ -599,7 +585,6 @@ elif menu == "📝 Registro Completo de Oficios":
                             "scg_val": scg_upper, "sis_val": siscat_upper, "tram": tramite_upper, "obs": obs_upper,
                             "arch": archivo_final, "id": int(oficio_sel['id'])
                         })
-                        st.cache_data.clear()
                         st.success("✅ Registro modificado y actualizado correctamente en la base de datos.")
                         st.rerun()
                     else:
@@ -612,7 +597,6 @@ elif menu == "📝 Registro Completo de Oficios":
                             "scg_val": scg_upper, "sis_val": siscat_upper, "tram": tramite_upper, "obs": obs_upper,
                             "arch": archivo_final
                         })
-                        st.cache_data.clear()
                         st.session_state["reset_key"] += 1
                         st.success("✅ Guardado correctamente. Todos los campos han sido limpiados para la siguiente captura.")
                         st.rerun()
@@ -676,7 +660,6 @@ elif menu == "⚙️ Gestión de Catálogos":
         if st.button("Guardar Opción SCG") and n_scg:
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_scg.strip().upper()})
-            st.cache_data.clear()
             st.success("Guardado.")
             st.rerun()
             
@@ -689,7 +672,6 @@ elif menu == "⚙️ Gestión de Catálogos":
         if st.button("Guardar Opción SISCAT") and n_siscat:
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_siscat.strip().upper()})
-            st.cache_data.clear()
             st.success("Guardado.")
             st.rerun()
             
@@ -702,7 +684,6 @@ elif menu == "⚙️ Gestión de Catálogos":
         if st.button("Guardar Trámite") and n_tramite:
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT DO NOTHING;"), {"n": n_tramite.strip().upper()})
-            st.cache_data.clear()
             st.success("Guardado.")
             st.rerun()
 
@@ -728,7 +709,6 @@ elif menu == "👥 Alta de Usuarios":
                 else:
                     exito, msg = registrar_nuevo_usuario(reg_user, reg_pwd, reg_nombre, reg_rol)
                     if exito:
-                        st.cache_data.clear()
                         st.success(msg)
                         st.rerun()
                     else:
@@ -755,7 +735,6 @@ elif menu == "👥 Alta de Usuarios":
         if st.button("🔄 Actualizar Contraseña"):
             if nueva_pwd_input and usr_cambiar_pwd:
                 exito_pwd, msg_pwd = cambiar_password_usuario(usr_cambiar_pwd, nueva_pwd_input)
-                st.cache_data.clear()
                 st.success(msg_pwd)
                 st.rerun()
 
@@ -765,6 +744,5 @@ elif menu == "👥 Alta de Usuarios":
             user_a_borrar = st.selectbox("Usuario a eliminar:", usuarios_para_borrar)
             if st.button("❌ Confirmar Eliminación"):
                 eliminar_usuario(user_a_borrar)
-                st.cache_data.clear()
                 st.success("Usuario eliminado.")
                 st.rerun()
