@@ -77,6 +77,7 @@ def init_db():
 
     try:
         with engine.begin() as conn:
+            # 1. Tabla Usuarios
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS usuarios (
@@ -113,19 +114,11 @@ def init_db():
                     "p": "admin123"
                 })
 
-            # 2. Catálogos Dinámicos (Asegurar que cat_sistemas_or se cree)
-conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
-conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
-conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
-conn.execute(text("CREATE TABLE IF NOT EXISTS cat_sistemas_or (nombre TEXT UNIQUE);")) # <--- AÑADIR ESTA LÍNEA
-
-# Inicializar valores por defecto para cat_sistemas_or
-sistemas_or_iniciales = ["CLASIFICADO", "PENDIENTE", "REVISION", "EN TRAMITE"]
-for item in sistemas_or_iniciales:
-    if is_sqlite:
-        conn.execute(text("INSERT OR IGNORE INTO cat_sistemas_or (nombre) VALUES (:n)"), {"n": item})
-    else:
-        conn.execute(text("INSERT INTO cat_sistemas_or (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
+            # 2. Catálogos Dinámicos
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_sistemas_or (nombre TEXT UNIQUE);"))
 
             for item in ["BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", "SISTEMAS", "SUBIDO"]:
                 conn.execute(text("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (:n)"), {"n": item.upper()})
@@ -133,12 +126,13 @@ for item in sistemas_or_iniciales:
             for item in ["ACUSE", "CONCLUIDO", "CORREO", "SISTEMAS", "SUBIDO"]:
                 conn.execute(text("INSERT OR IGNORE INTO cat_siscat (nombre) VALUES (:n)"), {"n": item.upper()})
 
-            for item in ["SISTEMAS", "OR"]:
+            for item in ["CLASIFICADO", "PENDIENTE", "REVISION", "EN TRAMITE", "SISTEMAS", "OR"]:
                 conn.execute(text("INSERT OR IGNORE INTO cat_sistemas_or (nombre) VALUES (:n)"), {"n": item.upper()})
 
             for item in ["CAMBIO DE DESTINO", "CAMBIO DE SUPERFICIE", "DOMINIO PLENO", "ACT. DE MOSAICO", "SENTENCIA"]:
                 conn.execute(text("INSERT OR IGNORE INTO cat_tramite (nombre) VALUES (:n)"), {"n": item.upper()})
 
+            # 3. Tabla Principal de Oficios
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS oficios (
@@ -188,9 +182,7 @@ for item in sistemas_or_iniciales:
                 except Exception:
                     pass
 
-            # -----------------------------------------------------------------
-            # NUEVA BASE: SEGUIMIENTO DE UBICACIÓN DE PREDIO (independiente de oficios)
-            # -----------------------------------------------------------------
+            # 4. Tabla de Seguimiento de Predio
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS seguimiento_predio (
@@ -291,7 +283,6 @@ def eliminar_oficio(id_oficio):
     return True, f"Oficio ID #{id_oficio} eliminado."
 
 def existe_folio_oficio(dgcat, excluir_id=None):
-    """Busca si un folio DGCAT ya existe en la tabla oficios. Devuelve el id existente o None."""
     engine = get_engine()
     dgcat_upper = str(dgcat).strip().upper()
     with engine.connect() as conn:
@@ -308,15 +299,6 @@ def existe_folio_oficio(dgcat, excluir_id=None):
         return res[0] if res else None
 
 def guardar_oficio(datos, id_oficio=None):
-    """
-    Inserta o actualiza un registro en 'oficios'.
-    datos: dict con las llaves de columna -> valor.
-    id_oficio: si se provee, actualiza ese registro; si no, inserta uno nuevo.
-    Devuelve (ok, mensaje). El commit ocurre dentro del 'with'; el rerun de
-    Streamlit se debe llamar DESPUÉS de que esta función retorne, nunca dentro
-    del bloque de transacción (st.rerun() lanza una excepción que provocaría
-    ROLLBACK si se ejecuta dentro de un 'with engine.begin()').
-    """
     engine = get_engine()
     try:
         with engine.begin() as conn:
@@ -334,9 +316,6 @@ def guardar_oficio(datos, id_oficio=None):
     except Exception as e:
         return False, f"Error al guardar en la base de datos: {e}"
 
-# -----------------------------------------------------------------------------
-# SEGUIMIENTO DE UBICACIÓN DE PREDIO (base independiente de oficios)
-# -----------------------------------------------------------------------------
 def guardar_seguimiento_predio(datos, id_registro=None):
     engine = get_engine()
     try:
@@ -381,9 +360,6 @@ def existe_folio_seguimiento(dgcat, excluir_id=None):
             ).fetchone()
         return res[0] if res else None
 
-# Relación entre cada tabla catálogo y la columna de 'oficios' que la usa,
-# para poder mantener sincronizados los registros ya capturados cuando se
-# renombra o elimina una opción del catálogo.
 CATALOGO_COLUMNA_OFICIOS = {
     "cat_scg": "scg",
     "cat_siscat": "siscat",
@@ -411,8 +387,6 @@ def actualizar_opcion_catalogo(tabla, nombre_antiguo, nombre_nuevo):
                 {"nuevo": nuevo_clean, "antiguo": antiguo_clean}
             )
 
-            # Propaga el cambio a los oficios que ya usaban el valor anterior,
-            # para que no queden registros con un valor de catálogo "huérfano".
             afectados = 0
             columna = CATALOGO_COLUMNA_OFICIOS.get(tabla)
             if columna:
@@ -443,8 +417,6 @@ def eliminar_opcion_catalogo(tabla, nombre_opcion):
         return False, f"Error al eliminar: {e}"
 
 def contar_oficios_con_valor_catalogo(tabla, nombre_opcion):
-    """Cuenta cuántos oficios ya capturados usan este valor de catálogo,
-    para advertir al usuario antes de eliminarlo."""
     columna = CATALOGO_COLUMNA_OFICIOS.get(tabla)
     if not columna:
         return 0
@@ -486,11 +458,9 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
     border_thin = Side(border_style="thin", color="D1D5DB")
     border_box = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
-    # TITULO DE RESUMEN EJECUTIVO
     ws_sum.cell(row=1, column=1, value="DIRECCIÓN GENERAL DE CATASTRO").font = font_title
     ws_sum.cell(row=2, column=1, value=f"REPORTE DE CONTROL DE GESTIÓN | FECHA: {datetime.now().strftime('%d/%m/%Y')}").font = font_sub
 
-    # ENCABEZADOS DE MÉTRICAS
     ws_sum.cell(row=4, column=1, value="Métrica Directiva").font = font_header
     ws_sum.cell(row=4, column=1).fill = fill_header
     ws_sum.cell(row=4, column=2, value="Valor").font = font_header
@@ -533,7 +503,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
         c1.alignment = Alignment(vertical="center")
         c2.alignment = Alignment(horizontal="center", vertical="center")
 
-    # TABLA DE DESGLOSE POR BANDEJA SCG
     start_r = 16
     ws_sum.cell(row=start_r, column=1, value="Bandeja SCG").font = font_header
     ws_sum.cell(row=start_r, column=1).fill = fill_header
@@ -552,7 +521,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx"):
             c1.alignment = Alignment(vertical="center")
             c2.alignment = Alignment(horizontal="center", vertical="center")
 
-    # DETALLE GENERAL
     headers = [
         "ID", "ID REGISTRO", "ESTADO", "MUNICIPIO", "EJIDO", 
         "NO. OFICIO", "DGCAT", "FECHA ENTREGA", "FECHA RECIBIDO", 
