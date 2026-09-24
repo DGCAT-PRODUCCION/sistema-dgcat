@@ -113,10 +113,19 @@ def init_db():
                     "p": "admin123"
                 })
 
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_sistemas_or (nombre TEXT UNIQUE);"))
-            conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
+            # 2. Catálogos Dinámicos (Asegurar que cat_sistemas_or se cree)
+conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
+conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
+conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
+conn.execute(text("CREATE TABLE IF NOT EXISTS cat_sistemas_or (nombre TEXT UNIQUE);")) # <--- AÑADIR ESTA LÍNEA
+
+# Inicializar valores por defecto para cat_sistemas_or
+sistemas_or_iniciales = ["CLASIFICADO", "PENDIENTE", "REVISION", "EN TRAMITE"]
+for item in sistemas_or_iniciales:
+    if is_sqlite:
+        conn.execute(text("INSERT OR IGNORE INTO cat_sistemas_or (nombre) VALUES (:n)"), {"n": item})
+    else:
+        conn.execute(text("INSERT INTO cat_sistemas_or (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": item})
 
             for item in ["BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", "SISTEMAS", "SUBIDO"]:
                 conn.execute(text("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (:n)"), {"n": item.upper()})
