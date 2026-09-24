@@ -542,7 +542,11 @@ elif menu == "📝 Registro Completo de Oficios":
 
     scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
+    # Reemplaza la línea 545 en app.py:
+try:
     sistemas_or_options = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
+except Exception:
+    sistemas_or_options = ["SIN ASIGNAR"]
     tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
 
     limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
