@@ -514,7 +514,7 @@ elif menu == "📝 Registro Completo de Oficios":
     if modo_accion == "➕ Nuevo Registro" and id_duplicado:
         st.warning(f"⚠️ El folio **{dgcat_check}** ya existe (ID #{id_duplicado}). Cambie a modo 'Modificar Registro Existente' para editarlo, o use un folio distinto.")
 
-  # 1. Cargar opciones con la opción por defecto '-- Seleccione --'
+    # Cargar opciones con la opción por defecto '-- Seleccione --'
     scg_raw = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     scg_options = ["-- Seleccione --"] + scg_raw
 
@@ -539,12 +539,12 @@ elif menu == "📝 Registro Completo de Oficios":
     val_obs = str(oficio_sel['observaciones']) if (oficio_sel is not None and pd.notna(oficio_sel['observaciones'])) else ""
 
     with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
-        # Definir índice por defecto si es modificación de registro
         idx_scg = scg_options.index(oficio_sel['scg']) if (oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
         idx_siscat = siscat_options.index(oficio_sel['siscat']) if (oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
         idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (oficio_sel is not None and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
         idx_tramite = tramite_options.index(oficio_sel['tipo_tramite']) if (oficio_sel is not None and oficio_sel['tipo_tramite'] in tramite_options) else 0
 
+        col1, col2 = st.columns(2)
         with col1:
             id_num = st.text_input("ID Numérico", value=val_id_reg)
             no_oficio = st.text_input("NO. OFICIO", value=val_no_oficio)
@@ -560,7 +560,7 @@ elif menu == "📝 Registro Completo de Oficios":
         observaciones = st.text_area("OBSERVACIONES", value=val_obs)
         archivo_nuevo = st.file_uploader("Subir/Reemplazar PDF Escaneado", type=["pdf"])
 
-       btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
+        btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
             if modo_accion == "➕ Nuevo Registro" and id_duplicado:
                 st.error(f"❌ No se guardó: el folio '{dgcat_check}' ya existe (ID #{id_duplicado}). Use 'Modificar Registro Existente'.")
