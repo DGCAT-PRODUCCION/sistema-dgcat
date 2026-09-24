@@ -514,15 +514,23 @@ elif menu == "📝 Registro Completo de Oficios":
     if modo_accion == "➕ Nuevo Registro" and id_duplicado:
         st.warning(f"⚠️ El folio **{dgcat_check}** ya existe (ID #{id_duplicado}). Cambie a modo 'Modificar Registro Existente' para editarlo, o use un folio distinto.")
 
-    scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
-    siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
+  # 1. Cargar opciones con la opción por defecto '-- Seleccione --'
+    scg_raw = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
+    scg_options = ["-- Seleccione --"] + scg_raw
+
+    siscat_raw = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
+    siscat_options = ["-- Seleccione --"] + siscat_raw
     
     try:
-        sistemas_or_options = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
+        sistemas_or_raw = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
+        if not sistemas_or_raw:
+            sistemas_or_raw = ["SISTEMAS", "OR"]
     except Exception:
-        sistemas_or_options = ["SIN ASIGNAR"]
+        sistemas_or_raw = ["SISTEMAS", "OR"]
+    sistemas_or_options = ["-- Seleccione --"] + sistemas_or_raw
 
-    tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
+    tramite_raw = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
+    tramite_options = ["-- Seleccione --"] + tramite_raw
 
     limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
 
@@ -531,28 +539,35 @@ elif menu == "📝 Registro Completo de Oficios":
     val_obs = str(oficio_sel['observaciones']) if (oficio_sel is not None and pd.notna(oficio_sel['observaciones'])) else ""
 
     with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
-        col1, col2 = st.columns(2)
+        # Definir índice por defecto si es modificación de registro
+        idx_scg = scg_options.index(oficio_sel['scg']) if (oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
+        idx_siscat = siscat_options.index(oficio_sel['siscat']) if (oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
+        idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (oficio_sel is not None and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
+        idx_tramite = tramite_options.index(oficio_sel['tipo_tramite']) if (oficio_sel is not None and oficio_sel['tipo_tramite'] in tramite_options) else 0
+
         with col1:
             id_num = st.text_input("ID Numérico", value=val_id_reg)
             no_oficio = st.text_input("NO. OFICIO", value=val_no_oficio)
             f_entrega = st.date_input("FECHA DE ENTREGA (DD/MM/AAAA)", value=date.today(), format="DD/MM/YYYY")
-            scg_sel = st.selectbox("Bandeja SCG", scg_options)
+            scg_sel = st.selectbox("Bandeja SCG *", scg_options, index=idx_scg)
 
         with col2:
             f_recibido = st.date_input("FECHA DE RECIBIDO (DD/MM/AAAA)", value=date.today(), format="DD/MM/YYYY")
-            siscat_sel = st.selectbox("Estatus SISCAT", siscat_options)
-            sistemas_or_sel = st.selectbox("SISTEMAS/OR", sistemas_or_options)
-            tipo_tramite = st.selectbox("TIPO DE TRÁMITE", tramite_options)
+            siscat_sel = st.selectbox("Estatus SISCAT *", siscat_options, index=idx_siscat)
+            sistemas_or_sel = st.selectbox("SISTEMAS/OR *", sistemas_or_options, index=idx_sistemas_or)
+            tipo_tramite = st.selectbox("TIPO DE TRÁMITE *", tramite_options, index=idx_tramite)
 
         observaciones = st.text_area("OBSERVACIONES", value=val_obs)
         archivo_nuevo = st.file_uploader("Subir/Reemplazar PDF Escaneado", type=["pdf"])
 
-        btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
+       btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
             if modo_accion == "➕ Nuevo Registro" and id_duplicado:
                 st.error(f"❌ No se guardó: el folio '{dgcat_check}' ya existe (ID #{id_duplicado}). Use 'Modificar Registro Existente'.")
             elif not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido.")
+            elif scg_sel == "-- Seleccione --" or siscat_sel == "-- Seleccione --" or sistemas_or_sel == "-- Seleccione --" or tipo_tramite == "-- Seleccione --":
+                st.error("⚠️ Debe seleccionar una opción válida en Bandeja SCG, Estatus SISCAT, SISTEMAS/OR y Tipo de Trámite.")
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
             else:
@@ -645,7 +660,15 @@ elif menu == "🔍 Consulta y Expedientes":
 elif menu == "🗂️ Consulta de Seguimiento de Predio":
     st.title("🗂️ Consulta de Seguimiento de Ubicación de Predio")
 
-    df_seg = pd.read_sql("SELECT * FROM seguimiento_predio ORDER BY id DESC", engine)
+    try:
+        df_seg = pd.read_sql("SELECT * FROM seguimiento_predio ORDER BY id DESC", engine)
+    except Exception:
+        df_seg = pd.DataFrame(columns=[
+            'id', 'dgcat', 'estado', 'municipio', 'ejido', 
+            'fecha_registro', 'fecha_actualizacion', 'observaciones', 
+            'archivo_escaneado', 'registrado_por'
+        ])
+
     df_seg.columns = [c.lower() for c in df_seg.columns]
 
     cols_order_seg = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'fecha_actualizacion', 'observaciones', 'archivo_escaneado', 'registrado_por']
@@ -656,29 +679,6 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
         df_seg_display[col] = df_seg_display[col].astype(str).str.upper()
 
     st.dataframe(df_seg_display, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("📁 Visor y Descarga de Archivos PDF (uploads/)")
-    df_seg_pdfs = df_seg_display[df_seg_display['archivo_escaneado'].notna() & (df_seg_display['archivo_escaneado'] != '') & (df_seg_display['archivo_escaneado'] != 'NONE')]
-    if not df_seg_pdfs.empty:
-        col_pdf1, col_pdf2 = st.columns([2, 1])
-        with col_pdf1:
-            pdf_sel_seg = st.selectbox("Seleccione el archivo PDF registrado a consultar:", df_seg_pdfs['archivo_escaneado'].unique(), key="pdf_seg_sel")
-        with col_pdf2:
-            st.write("<br>", unsafe_allow_html=True)
-            pdf_path_seg = os.path.join(UPLOADS_DIR, pdf_sel_seg)
-            if os.path.exists(pdf_path_seg):
-                with open(pdf_path_seg, "rb") as f:
-                    st.download_button("📥 Descargar PDF Escaneado", f, file_name=pdf_sel_seg, mime="application/pdf", type="primary", key="dl_pdf_seg")
-            else:
-                st.warning("⚠️ El archivo no se localizó físicamente en la carpeta uploads/.")
-    else:
-        st.info("ℹ️ No hay archivos PDF adjuntos registrados.")
-
-    st.markdown("---")
-    excel_file_seg = generar_excel_seguimiento(df_seg_display)
-    with open(excel_file_seg, "rb") as f:
-        st.download_button("📊 Descargar Reporte de Seguimiento en Excel (.xlsx)", f, file_name="Reporte_Seguimiento_Predio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_excel_seg")
 
 # -----------------------------------------------------------------------------
 # 5. GESTIÓN DE CATÁLOGOS
