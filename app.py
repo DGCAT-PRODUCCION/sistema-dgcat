@@ -224,7 +224,6 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
     
-    # METRICAS DIRECTIVAS PRINCIPALES
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     total_oficios = len(df_filtered)
@@ -245,7 +244,6 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 1. CONTROL DIGITAL DE EXPEDIENTES PDF
     st.subheader("📄 Control Digital de Expedientes PDF")
     has_pdf = df_filtered['archivo_escaneado'].notna() & (df_filtered['archivo_escaneado'] != '') & (df_filtered['archivo_escaneado'] != 'NONE')
     pdf_subidos = len(df_filtered[has_pdf])
@@ -271,10 +269,8 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
 
-    # 2. SECCIÓN DE BANDEJAS SCG Y SISCAT
     g_col1, g_col2 = st.columns(2)
 
-    # BANDEJA SCG EN FORMATO CIRCULAR / PIE
     with g_col1:
         st.subheader("🍩 Distribución por Bandeja SCG")
         scg_counts = df_filtered['scg'].value_counts().reset_index()
@@ -301,10 +297,8 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
 
-    # 3. TOP ESTADOS Y VOLUMETRÍA POR TIPO DE TRÁMITE
     g_col3, g_col4 = st.columns(2)
 
-    # TOP ESTADOS: ESCALA 'Greens' (VERDE OSCURO PARA EL MAYOR / VERACRUZ)
     with g_col3:
         st.subheader("🇲🇽 Top 10 Estados con Mayor Carga Registrada")
         top_estados = df_filtered['estado'].value_counts().head(10).reset_index()
@@ -320,7 +314,6 @@ if menu == "📈 Dashboard Ejecutivo":
         )
         st.plotly_chart(fig_top_estados, use_container_width=True)
 
-    # VOLUMETRÍA POR TIPO DE TRÁMITE (BARRAS HORIZONTALES)
     with g_col4:
         st.subheader("📑 Volumetría por Tipo de Trámite")
         
@@ -357,17 +350,11 @@ if menu == "📈 Dashboard Ejecutivo":
 
 # -----------------------------------------------------------------------------
 # 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
-#    (base de datos independiente de 'oficios', misma estructura de captura
-#    que la anterior "Carga Institucional de Expediente PDF (Operador)")
 # -----------------------------------------------------------------------------
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
-    st.caption("Todos los campos marcados con (*) son estrictamente OBLIGATORIOS.")
+    st.caption("Todos los campos marcados con (*) son strictly OBLIGATORIOS.")
 
-    # Los selectores dependientes (Estado -> Municipio -> Ejido) se colocan
-    # FUERA del st.form: dentro de un formulario, Streamlit no vuelve a
-    # ejecutar el script al cambiar un selectbox, por lo que Municipio/Ejido
-    # no se actualizarían al cambiar el Estado.
     es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
 
     estados_list = get_estados()
@@ -388,8 +375,6 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.markdown("---")
     dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/", key="dgcat_seguimiento")
 
-    # Aviso de "buscar si existe" ANTES de guardar, para que el usuario sepa
-    # si va a crear un registro nuevo o si ya existe uno con ese folio.
     dgcat_check = dgcat_folio.strip().upper()
     id_existente = existe_folio_seguimiento(dgcat_check) if dgcat_check and dgcat_check != "DGCAT/100/" else None
     if id_existente:
@@ -444,8 +429,6 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     datos["archivo_escaneado"] = nombre_archivo or ""
                     ok, msg = guardar_seguimiento_predio(datos)
 
-                # st.rerun() se llama DESPUÉS de que la escritura ya se
-                # confirmó (commit) dentro de guardar_seguimiento_predio.
                 if ok:
                     st.success(f"✅ {msg}")
                     st.rerun()
@@ -471,8 +454,6 @@ elif menu == "📝 Registro Completo de Oficios":
 
         df_oficios['display_name'] = "ID #" + df_oficios['id'].astype(str) + " | Folio: " + df_oficios['dgcat'].astype(str) + " | Oficio: " + df_oficios['no_oficio'].fillna('').astype(str)
 
-        # BUSCADOR: filtra la lista por folio, no. de oficio o estado antes
-        # de elegir el registro, en vez de recorrer manualmente el combo.
         texto_busqueda = st.text_input("🔎 Buscar por folio DGCAT, No. de oficio o Estado (opcional):")
         df_busqueda = df_oficios
         if texto_busqueda.strip():
@@ -503,11 +484,6 @@ elif menu == "📝 Registro Completo de Oficios":
                 st.error(f"❌ {msg}")
         st.stop()
 
-    # Los selectores dependientes (Estado -> Municipio -> Ejido) van FUERA del
-    # st.form: dentro de un formulario, Streamlit solo vuelve a ejecutar el
-    # script al presionar "Guardar", así que Municipio/Ejido no reaccionarían
-    # al cambio de Estado si estuvieran dentro del form. Esto era la causa de
-    # que el alta/edición pareciera "no funcionar".
     es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
     estados_list = get_estados()
 
@@ -532,8 +508,6 @@ elif menu == "📝 Registro Completo de Oficios":
     val_dgcat = str(oficio_sel['dgcat']) if (oficio_sel is not None and pd.notna(oficio_sel['dgcat'])) else "DGCAT/100/"
     dgcat_folio = st.text_input("Folio DGCAT", value=val_dgcat, key="dgcat_registro_completo")
 
-    # "Buscar si existe": valida el folio en vivo, fuera del form, antes de
-    # guardar, para evitar duplicados al dar de alta y avisar cuando ya existe.
     dgcat_check = dgcat_folio.strip().upper()
     id_excluir = int(oficio_sel['id']) if oficio_sel is not None else None
     id_duplicado = existe_folio_oficio(dgcat_check, excluir_id=id_excluir) if dgcat_check and dgcat_check != "DGCAT/100/" else None
@@ -542,11 +516,12 @@ elif menu == "📝 Registro Completo de Oficios":
 
     scg_options = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
-    # Reemplaza la línea 545 en app.py:
-try:
-    sistemas_or_options = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
-except Exception:
-    sistemas_or_options = ["SIN ASIGNAR"]
+    
+    try:
+        sistemas_or_options = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
+    except Exception:
+        sistemas_or_options = ["SIN ASIGNAR"]
+
     tramite_options = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
 
     limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
@@ -616,12 +591,6 @@ except Exception:
                     datos["archivo_escaneado"] = archivo_final
                     ok, msg = guardar_oficio(datos)
 
-                # IMPORTANTE: st.rerun() se llama aquí, DESPUÉS de que
-                # guardar_oficio() ya hizo commit de la transacción. Llamar a
-                # st.rerun() dentro de un 'with engine.begin()' provoca que
-                # SQLAlchemy interprete la interrupción como un error y haga
-                # ROLLBACK, por lo que el registro nunca quedaba guardado:
-                # ese era el motivo real de que "no dejara" agregar/modificar.
                 if ok:
                     st.success(f"✅ {msg}")
                     st.rerun()
@@ -671,7 +640,7 @@ elif menu == "🔍 Consulta y Expedientes":
         st.download_button("📊 Descargar Reporte Ejecutivo en Excel (.xlsx)", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -----------------------------------------------------------------------------
-# 4B. CONSULTA DE SEGUIMIENTO DE UBICACIÓN DE PREDIO (base independiente)
+# 4B. CONSULTA DE SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
 elif menu == "🗂️ Consulta de Seguimiento de Predio":
     st.title("🗂️ Consulta de Seguimiento de Ubicación de Predio")
