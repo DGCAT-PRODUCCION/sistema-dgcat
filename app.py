@@ -10,17 +10,14 @@ from database import (
     registrar_nuevo_usuario, 
     get_engine, 
     generar_excel_ejecutivo,
-    generar_excel_seguimiento,
     eliminar_oficio,
     actualizar_opcion_catalogo,
     eliminar_opcion_catalogo,
-    contar_oficios_con_valor_catalogo,
     eliminar_usuario,
     cambiar_password_usuario,
     existe_folio_oficio,
     guardar_oficio,
     guardar_seguimiento_predio,
-    eliminar_seguimiento_predio,
     existe_folio_seguimiento,
     obtener_oficios_paginados,
     obtener_seguimiento_paginado
@@ -247,12 +244,14 @@ if menu == "📈 Dashboard Ejecutivo":
     with kpi5: st.markdown(f'<div class="metric-card" style="border-top-color:#8B5CF6;"><h3>SISTEMAS / OR</h3><div class="number" style="color:#8B5CF6;">{sistemas_or_val:,}</div><div class="subtitle">Trámite Clasificado</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+    
+    # BLOQUE 1 DE GRÁFICAS
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         st.subheader("🍩 Distribución por Bandeja SCG")
         scg_counts = df_filtered['scg'].value_counts().reset_index()
         scg_counts.columns = ['Bandeja', 'Cantidad']
-        fig_pie_scg = px.pie(scg_counts, values='Cantidad', names='Bandeja', color_discrete_sequence=px.colors.qualitative.G10)
+        fig_pie_scg = px.pie(scg_counts, values='Cantidad', names='Bandeja', color_discrete_sequence=px.colors.qualitative.G10, hole=0.4)
         st.plotly_chart(fig_pie_scg, use_container_width=True)
 
     with g_col2:
@@ -261,6 +260,27 @@ if menu == "📈 Dashboard Ejecutivo":
         siscat_counts.columns = ['Estatus', 'Cantidad']
         fig_bar_siscat = px.bar(siscat_counts, x='Cantidad', y='Estatus', orientation='h', color='Estatus', text='Cantidad', color_discrete_sequence=px.colors.qualitative.Vivid)
         st.plotly_chart(fig_bar_siscat, use_container_width=True)
+
+    st.markdown("---")
+    
+    # BLOQUE 2 DE GRÁFICAS (VOLUMETRÍA POR ESTADO Y TRAMITE)
+    g_col3, g_col4 = st.columns(2)
+    with g_col3:
+        st.subheader(" Top 10 Estados con Mayor Carga Registrada")
+        top_estados = df_filtered['estado'].value_counts().head(10).reset_index()
+        top_estados.columns = ['Estado', 'Oficios']
+        fig_top_estados = px.bar(top_estados, x='Estado', y='Oficios', color='Oficios', text='Oficios', color_continuous_scale='Greens')
+        fig_top_estados.update_layout(xaxis_title="", yaxis_title="Total Oficios", coloraxis_showscale=False)
+        st.plotly_chart(fig_top_estados, use_container_width=True)
+
+    with g_col4:
+        st.subheader("📑 Volumetría por Tipo de Trámite")
+        col_tram = 'tipo_tramite' if 'tipo_tramite' in df_filtered.columns else 'observaciones'
+        obs_counts = df_filtered[col_tram].value_counts().head(8).reset_index()
+        obs_counts.columns = ['Trámite', 'Cantidad']
+        fig_obs = px.pie(obs_counts, values='Cantidad', names='Trámite', color_discrete_sequence=px.colors.qualitative.Prism)
+        fig_obs.update_traces(textinfo='label+value')
+        st.plotly_chart(fig_obs, use_container_width=True)
 
 # -----------------------------------------------------------------------------
 # 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
@@ -354,12 +374,10 @@ elif menu == "📝 Registro Completo de Oficios":
 
     modo_accion = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True)
 
-    # 1. Gestionar el estado del folio para evitar cierres o reinicios accidentales
     if "dgcat_registro_completo" not in st.session_state:
         st.session_state["dgcat_registro_completo"] = "DGCAT/100/"
 
     if modo_accion == "➕ Nuevo Registro":
-        # Si venía de una modificación previa, reiniciar el folio al cambiar a Nuevo Registro
         if st.session_state.get("last_modo") != "➕ Nuevo Registro":
             st.session_state["dgcat_registro_completo"] = "DGCAT/100/"
     st.session_state["last_modo"] = modo_accion
@@ -390,7 +408,6 @@ elif menu == "📝 Registro Completo de Oficios":
         idx_match = df_busqueda[df_busqueda['display_name'] == seleccion].index[0]
         oficio_sel = df_busqueda.loc[idx_match]
         
-        # Asignar el folio seleccionado al estado
         if oficio_sel is not None and pd.notna(oficio_sel['dgcat']):
             st.session_state["dgcat_registro_completo"] = str(oficio_sel['dgcat'])
 
@@ -430,7 +447,6 @@ elif menu == "📝 Registro Completo de Oficios":
 
     st.markdown("---")
 
-    # Catálogos obligatorios con '-- Seleccione --'
     scg_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
     
@@ -447,8 +463,9 @@ elif menu == "📝 Registro Completo de Oficios":
 
     limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
 
-    # 2. Todo el formulario unificado dentro de st.form
+    # FORMULARIO COMPLETO UNIFICADO
     with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
+        # Folio DGCAT al inicio del formulario para retención de valor
         dgcat_folio = st.text_input("Folio DGCAT *", value=st.session_state["dgcat_registro_completo"])
 
         idx_scg = scg_options.index(oficio_sel['scg']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
@@ -518,6 +535,7 @@ elif menu == "📝 Registro Completo de Oficios":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
+
 # -----------------------------------------------------------------------------
 # 4. CONSULTA DE EXPEDIENTES DGCAT Y DESCARGA
 # -----------------------------------------------------------------------------
@@ -543,7 +561,6 @@ elif menu == "🔍 Consulta y Expedientes":
         cols_presentes = [c for c in cols_order if c in df_data.columns]
         df_display = df_data[cols_presentes].copy()
 
-        # Formatear visualmente las fechas a DD/MM/AAAA para el usuario
         for col_fecha in ['fecha_entrega', 'fecha_recibido']:
             if col_fecha in df_display.columns:
                 df_display[col_fecha] = pd.to_datetime(df_display[col_fecha], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
