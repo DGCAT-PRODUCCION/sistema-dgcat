@@ -129,7 +129,7 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 st.sidebar.markdown("---")
 engine = get_engine()
 
-# CONTROL DE ROL EN FRONTEND (Punto 7)
+# CONTROL DE ROL EN FRONTEND
 if st.session_state["rol"] == "operador":
     menu_options = ["📍 Seguimiento de Ubicación de Predio"]
 elif st.session_state["rol"] == "supervisor":
@@ -155,7 +155,7 @@ else:  # admin
 menu = st.sidebar.radio("Menú de Opciones", menu_options)
 
 # -----------------------------------------------------------------------------
-# FUNCIONES AUXILIARES DE UBICACIÓN Y BÚSQUEDA
+# FUNCIONES AUXILIARES DE UBICACIÓN
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def get_cat_ubicaciones_df():
@@ -192,7 +192,7 @@ def get_ejidos(estado, municipio):
     return sorted(list(filtered['ejido'].dropna().unique()))
 
 # -----------------------------------------------------------------------------
-# 1. DASHBOARD EJECUTIVO (Con Botón "🔄 Actualizar ahora" - Punto 9)
+# 1. DASHBOARD EJECUTIVO
 # -----------------------------------------------------------------------------
 if menu == "📈 Dashboard Ejecutivo":
     col_dash_t, col_dash_btn = st.columns([3, 1])
@@ -263,7 +263,7 @@ if menu == "📈 Dashboard Ejecutivo":
         st.plotly_chart(fig_bar_siscat, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO (Con Refresh Automático - Punto 2)
+# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
@@ -339,12 +339,12 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                 if ok:
                     st.cache_data.clear()
                     st.success(f"✅ {msg}")
-                    st.rerun() # Refresh automático
+                    st.rerun()
                 else:
                     st.error(f"❌ {msg}")
 
 # -----------------------------------------------------------------------------
-# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS (Con Refresh y Auditoría - Punto 1 y 10)
+# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -388,7 +388,7 @@ elif menu == "📝 Registro Completo de Oficios":
             if ok:
                 st.cache_data.clear()
                 st.success(f"✅ {msg}")
-                st.rerun() # Refresh automático tras eliminar
+                st.rerun()
             else:
                 st.error(f"❌ {msg}")
         st.stop()
@@ -473,7 +473,7 @@ elif menu == "📝 Registro Completo de Oficios":
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
             else:
-                # Convertir las fechas al formato ISO (YYYY-MM-DD) para que PostgreSQL las acepte sin error
+                # Formato ISO (YYYY-MM-DD) para compatibilidad con PostgreSQL
                 str_f_entrega = f_entrega.strftime('%Y-%m-%d') if f_entrega else None
                 str_f_recibido = f_recibido.strftime('%Y-%m-%d') if f_recibido else None
 
@@ -501,21 +501,20 @@ elif menu == "📝 Registro Completo de Oficios":
                 if ok:
                     st.cache_data.clear()
                     st.success(f"✅ {msg}")
-                    st.rerun() # Refresh automático
+                    st.rerun()
                 else:
                     st.error(f"❌ {msg}")
 
 # -----------------------------------------------------------------------------
-# 4. CONSULTA DE EXPEDIENTES DGCAT Y DESCARGA (PAGINADO - Puntos 3 y 8)
+# 4. CONSULTA DE EXPEDIENTES DGCAT Y DESCARGA
 # -----------------------------------------------------------------------------
 elif menu == "🔍 Consulta y Expedientes":
     st.title("🔍 Consulta de Expedientes DGCAT y Descarga de PDF")
     
-    # Muestra Fecha Dinámica de Consulta (Punto 3.3)
     fecha_actual_str = datetime.now().strftime('%d de %B de %Y')
     st.markdown(f"**Información actualizada:** {fecha_actual_str}")
     
-    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 1, 1, 1])
+    col_f1, col_f2, col_f3 = st.columns([2, 1, 1])
     with col_f1:
         txt_buscar = st.text_input("🔎 Buscar en catálogo:")
     with col_f2:
@@ -524,14 +523,17 @@ elif menu == "🔍 Consulta y Expedientes":
         page_num = st.number_input("Página:", min_value=1, value=1, step=1)
 
     df_data, total_recs, total_pags = obtener_oficios_paginados(page=page_num, page_size=page_size, busqueda=txt_buscar)
-    
     st.caption(f"Mostrando página {page_num} de {total_pags} | Total de registros encontrados: {total_recs:,}")
 
     if not df_data.empty:
-        # OCULTAR COLUMNA ID INTERNA (Punto 3.1)
         cols_order = ['id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
         cols_presentes = [c for c in cols_order if c in df_data.columns]
-        df_display = df_data[cols_presentes]
+        df_display = df_data[cols_presentes].copy()
+
+        # Formatear visualmente las fechas a DD/MM/AAAA para el usuario
+        for col_fecha in ['fecha_entrega', 'fecha_recibido']:
+            if col_fecha in df_display.columns:
+                df_display[col_fecha] = pd.to_datetime(df_display[col_fecha], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
 
         for col in df_display.select_dtypes(include=['object']).columns:
             df_display[col] = df_display[col].astype(str).str.upper()
@@ -543,7 +545,6 @@ elif menu == "🔍 Consulta y Expedientes":
     st.markdown("---")
     st.subheader("📁 Visor y Descarga de Expedientes PDF")
     
-    # Manejo Seguro de Visor y Archivos Inexistentes (Punto 3.4 y 3.5)
     if not df_data.empty and 'archivo_escaneado' in df_data.columns:
         df_pdfs = df_data[df_data['archivo_escaneado'].notna() & (df_data['archivo_escaneado'] != '') & (df_data['archivo_escaneado'] != 'NONE')]
         if not df_pdfs.empty:
@@ -567,12 +568,9 @@ elif menu == "🔍 Consulta y Expedientes":
         excel_file = generar_excel_ejecutivo(df_exp)
         with open(excel_file, "rb") as f:
             st.download_button("📥 Descargar Excel", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-# Formatear columnas de fecha para visualización en pantalla (DD/MM/AAAA)
-for col_fecha in ['fecha_entrega', 'fecha_recibido']:
-    if col_fecha in df_display.columns:
-        df_display[col_fecha] = pd.to_datetime(df_display[col_fecha], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
+
 # -----------------------------------------------------------------------------
-# 5. CONSULTA DE SEGUIMIENTO DE PREDIO (Con Paginación - Punto 5)
+# 5. CONSULTA DE SEGUIMIENTO DE PREDIO
 # -----------------------------------------------------------------------------
 elif menu == "🗂️ Consulta de Seguimiento de Predio":
     st.title("🗂️ Consulta de Seguimiento de Ubicación de Predio")
@@ -592,10 +590,9 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
     st.caption(f"Mostrando página {page_num_seg} de {total_pags_s} | Total de registros: {total_recs_s:,}")
 
     if not df_seg.empty:
-        # OCULTAR COLUMNA ID (Punto 5)
         cols_order_seg = ['dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'fecha_actualizacion', 'observaciones', 'archivo_escaneado', 'registrado_por']
         cols_presentes_seg = [c for c in cols_order_seg if c in df_seg.columns]
-        df_seg_display = df_seg[cols_presentes_seg]
+        df_seg_display = df_seg[cols_presentes_seg].copy()
 
         for col in df_seg_display.select_dtypes(include=['object']).columns:
             df_seg_display[col] = df_seg_display[col].astype(str).str.upper()
@@ -683,10 +680,9 @@ elif menu == "⚙️ Gestión de Catálogos":
     with t4: render_catalogo_produccion("cat_tramite", "Tipos de Trámite")
 
 # -----------------------------------------------------------------------------
-# 7. GESTIÓN COMPLETA DE USUARIOS (Con Seguridad Backend - Punto 6 y 7)
+# 7. GESTIÓN COMPLETA DE USUARIOS
 # -----------------------------------------------------------------------------
 elif menu == "👥 Alta de Usuarios":
-    # Validación Backend Estricta de Rol (Punto 7)
     if st.session_state["rol"] != "admin":
         st.error("⛔ ACCESO NO AUTORIZADO: Este módulo requiere privilegios de Administrador.")
         st.stop()
@@ -710,7 +706,7 @@ elif menu == "👥 Alta de Usuarios":
                     if exito:
                         st.cache_data.clear()
                         st.success(msg)
-                        st.rerun() # Refresh automático
+                        st.rerun()
                     else:
                         st.error(msg)
 
@@ -729,7 +725,7 @@ elif menu == "👥 Alta de Usuarios":
             ok, msg = cambiar_password_usuario(usr_mod, pwd_nueva)
             if ok:
                 st.success(f"✅ {msg}")
-                st.rerun() # Refresh automático (Punto 6)
+                st.rerun()
 
         st.markdown("---")
         st.write("### 🗑️ Eliminar Usuario")
@@ -738,4 +734,4 @@ elif menu == "👥 Alta de Usuarios":
             ok, msg = eliminar_usuario(usr_del)
             if ok:
                 st.success(f"✅ {msg}")
-                st.rerun() # Refresh automático y limpia selección (Punto 6)
+                st.rerun()
