@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import plotly.express as px
-from datetime import date
+from datetime import datetime, date
 from sqlalchemy import text
 from database import (
     init_db, 
@@ -22,6 +22,8 @@ from database import (
     guardar_seguimiento_predio,
     eliminar_seguimiento_predio,
     existe_folio_seguimiento,
+    obtener_oficios_paginados,
+    obtener_seguimiento_paginado
 )
 
 st.set_page_config(
@@ -37,10 +39,6 @@ st.markdown("""
     .header-title { font-size: 2.2rem; font-weight: 800; margin-bottom: 4px; }
     .header-subtitle { color: #10B981; font-size: 1.15rem; font-weight: 600; margin-bottom: 15px; }
     .header-line { height: 3px; background: linear-gradient(90deg, transparent 0%, #10B981 50%, transparent 100%); border: none; margin-bottom: 25px; }
-
-    .stSelectbox label, .stTextInput label, .stDateInput label, .stTextArea label {
-        font-weight: 700 !important; font-size: 0.95rem !important;
-    }
 
     .metric-card {
         background: rgba(16, 185, 129, 0.08);
@@ -58,10 +56,6 @@ st.markdown("""
         background-color: #10B981; color: #FFFFFF; padding: 10px 18px; border-radius: 8px;
         font-weight: 700; font-size: 0.95rem; margin-bottom: 25px; display: flex;
         justify-content: space-between; align-items: center;
-    }
-
-    [data-testid="stSidebarHeader"] img, [data-testid="stImage"] img {
-        max-height: 100px !important; object-fit: contain !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -121,8 +115,6 @@ st.markdown(f"""
 
 if os.path.exists("logo_ran.png"):
     st.sidebar.image("logo_ran.png", use_container_width=True)
-elif os.path.exists("Logo_RAN.png"):
-    st.sidebar.image("Logo_RAN.png", use_container_width=True)
 
 st.sidebar.title(f"👤 {st.session_state['nombre']}")
 st.sidebar.caption(f"ROL: {st.session_state['rol'].upper()}")
@@ -137,9 +129,19 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 st.sidebar.markdown("---")
 engine = get_engine()
 
+# CONTROL DE ROL EN FRONTEND (Punto 7)
 if st.session_state["rol"] == "operador":
     menu_options = ["📍 Seguimiento de Ubicación de Predio"]
-else:
+elif st.session_state["rol"] == "supervisor":
+    menu_options = [
+        "📈 Dashboard Ejecutivo", 
+        "📝 Registro Completo de Oficios", 
+        "📍 Seguimiento de Ubicación de Predio", 
+        "🔍 Consulta y Expedientes", 
+        "🗂️ Consulta de Seguimiento de Predio",
+        "⚙️ Gestión de Catálogos"
+    ]
+else:  # admin
     menu_options = [
         "📈 Dashboard Ejecutivo", 
         "📝 Registro Completo de Oficios", 
@@ -152,6 +154,9 @@ else:
 
 menu = st.sidebar.radio("Menú de Opciones", menu_options)
 
+# -----------------------------------------------------------------------------
+# FUNCIONES AUXILIARES DE UBICACIÓN Y BÚSQUEDA
+# -----------------------------------------------------------------------------
 @st.cache_data(ttl=600)
 def get_cat_ubicaciones_df():
     try:
@@ -162,19 +167,17 @@ def get_cat_ubicaciones_df():
         col_mun = [c for c in df.columns if 'muni' in c][0] if any('muni' in c for c in df.columns) else df.columns[1]
         col_eji = [c for c in df.columns if 'nucleo' in c or 'ejido' in c or 'nuc' in c][0] if any('nucleo' in c or 'ejido' in c or 'nuc' in c for c in df.columns) else df.columns[2]
         
-        res_df = pd.DataFrame({
+        return pd.DataFrame({
             'estado': df[col_edo].astype(str).str.strip().str.upper(),
             'municipio': df[col_mun].astype(str).str.strip().str.upper(),
             'ejido': df[col_eji].astype(str).str.strip().str.upper()
         })
-        return res_df
     except Exception:
         return pd.DataFrame(columns=['estado', 'municipio', 'ejido'])
 
 def get_estados():
     df = get_cat_ubicaciones_df()
-    if df.empty: return []
-    return sorted(list(df['estado'].dropna().unique()))
+    return [] if df.empty else sorted(list(df['estado'].dropna().unique()))
 
 def get_municipios(estado):
     df = get_cat_ubicaciones_df()
@@ -185,17 +188,23 @@ def get_municipios(estado):
 def get_ejidos(estado, municipio):
     df = get_cat_ubicaciones_df()
     if df.empty: return []
-    filtered = df[
-        (df['estado'].str.upper() == str(estado).strip().upper()) & 
-        (df['municipio'].str.upper() == str(municipio).strip().upper())
-    ]
+    filtered = df[(df['estado'].str.upper() == str(estado).strip().upper()) & (df['municipio'].str.upper() == str(municipio).strip().upper())]
     return sorted(list(filtered['ejido'].dropna().unique()))
 
 # -----------------------------------------------------------------------------
-# 1. DASHBOARD EJECUTIVO
+# 1. DASHBOARD EJECUTIVO (Con Botón "🔄 Actualizar ahora" - Punto 9)
 # -----------------------------------------------------------------------------
 if menu == "📈 Dashboard Ejecutivo":
-    st.title("🏛️ Tablero de Control Directivo DGCAT")
+    col_dash_t, col_dash_btn = st.columns([3, 1])
+    with col_dash_t:
+        st.title("🏛️ Tablero de Control Directivo DGCAT")
+    with col_dash_btn:
+        st.write("<br>", unsafe_allow_html=True)
+        if st.button("🔄 Actualizar ahora", type="primary", use_container_width=True):
+            st.cache_data.clear()
+            st.success("Información actualizada correctamente.")
+            st.rerun()
+
     st.caption("Monitoreo institucional de oficios de respuesta, expedientes PDF digitalizados, SCG y SISCAT.")
     
     df_raw = pd.read_sql("SELECT * FROM oficios", engine)
@@ -208,14 +217,11 @@ if menu == "📈 Dashboard Ejecutivo":
     with st.expander("🔍 **Filtros de Control Ejecutivo**", expanded=True):
         f_col1, f_col2, f_col3 = st.columns(3)
         with f_col1:
-            estados_opts = ["TODOS"] + sorted(list(df_raw['estado'].dropna().unique()))
-            sel_estado = st.selectbox("Estado", estados_opts)
+            sel_estado = st.selectbox("Estado", ["TODOS"] + sorted(list(df_raw['estado'].dropna().unique())))
         with f_col2:
-            scg_opts = ["TODOS"] + sorted(list(df_raw['scg'].dropna().unique()))
-            sel_scg = st.selectbox("Estatus SCG", scg_opts)
+            sel_scg = st.selectbox("Estatus SCG", ["TODOS"] + sorted(list(df_raw['scg'].dropna().unique())))
         with f_col3:
-            siscat_opts = ["TODOS"] + sorted(list(df_raw['siscat'].dropna().unique()))
-            sel_siscat = st.selectbox("Estatus SISCAT", siscat_opts)
+            sel_siscat = st.selectbox("Estatus SISCAT", ["TODOS"] + sorted(list(df_raw['siscat'].dropna().unique())))
 
     df_filtered = df_raw.copy()
     if sel_estado != "TODOS": df_filtered = df_filtered[df_filtered['estado'] == sel_estado]
@@ -223,15 +229,13 @@ if menu == "📈 Dashboard Ejecutivo":
     if sel_siscat != "TODOS": df_filtered = df_filtered[df_filtered['siscat'] == sel_siscat]
 
     st.markdown("---")
-    
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     total_oficios = len(df_filtered)
     concluidos_scg = len(df_filtered[df_filtered['scg'] == 'CONCLUIDO'])
     subidos_siscat = len(df_filtered[df_filtered['siscat'].isin(['CONCLUIDO', 'SUBIDO'])])
     en_sistemas = len(df_filtered[df_filtered['scg'].astype(str).str.contains('SISTEMAS', case=False, na=False)])
-    
-    sistemas_or_val = len(df_filtered[df_filtered['sistemas_or'].notna() & (df_filtered['sistemas_or'].astype(str).str.strip() != '') & (df_filtered['sistemas_or'].astype(str).str.upper() != 'NONE')]) if 'sistemas_or' in df_filtered.columns else 0
+    sistemas_or_val = len(df_filtered[df_filtered['sistemas_or'].notna() & (df_filtered['sistemas_or'].astype(str).str.strip() != '')]) if 'sistemas_or' in df_filtered.columns else 0
     
     pct_scg = round((concluidos_scg / total_oficios * 100), 1) if total_oficios > 0 else 0
     pct_siscat = round((subidos_siscat / total_oficios * 100), 1) if total_oficios > 0 else 0
@@ -243,120 +247,29 @@ if menu == "📈 Dashboard Ejecutivo":
     with kpi5: st.markdown(f'<div class="metric-card" style="border-top-color:#8B5CF6;"><h3>SISTEMAS / OR</h3><div class="number" style="color:#8B5CF6;">{sistemas_or_val:,}</div><div class="subtitle">Trámite Clasificado</div></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    st.subheader("📄 Control Digital de Expedientes PDF")
-    has_pdf = df_filtered['archivo_escaneado'].notna() & (df_filtered['archivo_escaneado'] != '') & (df_filtered['archivo_escaneado'] != 'NONE')
-    pdf_subidos = len(df_filtered[has_pdf])
-    pdf_pendientes = total_oficios - pdf_subidos
-    pct_pdf = round((pdf_subidos / total_oficios * 100), 1) if total_oficios > 0 else 0
-
-    pdf_col1, pdf_col2 = st.columns([1, 2])
-    with pdf_col1:
-        st.markdown(f'<div class="metric-card" style="border-top-color: #3B82F6;"><h3>DIGITALIZACIÓN PDF</h3><div class="number" style="color:#3B82F6;">{pct_pdf}%</div><div class="subtitle">{pdf_subidos:,} Subidos | {pdf_pendientes:,} Pendientes</div></div>', unsafe_allow_html=True)
-
-    with pdf_col2:
-        df_pdf_chart = pd.DataFrame({
-            'Estatus Expediente': ['CON EXPEDIENTE PDF', 'PENDIENTE DE PDF'],
-            'Cantidad': [pdf_subidos, pdf_pendientes]
-        })
-        fig_pdf = px.pie(
-            df_pdf_chart, values='Cantidad', names='Estatus Expediente', hole=0.5, 
-            color='Estatus Expediente', color_discrete_map={'CON EXPEDIENTE PDF': '#10B981', 'PENDIENTE DE PDF': '#EF4444'}
-        )
-        fig_pdf.update_traces(textposition='inside', textinfo='percent+value')
-        fig_pdf.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=200, showlegend=True)
-        st.plotly_chart(fig_pdf, use_container_width=True)
-
-    st.markdown("---")
-
     g_col1, g_col2 = st.columns(2)
-
     with g_col1:
         st.subheader("🍩 Distribución por Bandeja SCG")
         scg_counts = df_filtered['scg'].value_counts().reset_index()
         scg_counts.columns = ['Bandeja', 'Cantidad']
-        fig_pie_scg = px.pie(
-            scg_counts, values='Cantidad', names='Bandeja',
-            color_discrete_sequence=px.colors.qualitative.G10
-        )
-        fig_pie_scg.update_traces(textinfo='label+value', textposition='inside')
-        fig_pie_scg.update_layout(showlegend=True, margin=dict(t=20, b=20, l=20, r=20))
+        fig_pie_scg = px.pie(scg_counts, values='Cantidad', names='Bandeja', color_discrete_sequence=px.colors.qualitative.G10)
         st.plotly_chart(fig_pie_scg, use_container_width=True)
 
     with g_col2:
         st.subheader("📊 Control e Integración en SISCAT")
         siscat_counts = df_filtered['siscat'].value_counts().reset_index()
         siscat_counts.columns = ['Estatus', 'Cantidad']
-        
-        fig_bar_siscat = px.bar(
-            siscat_counts, x='Cantidad', y='Estatus', orientation='h', color='Estatus', 
-            text='Cantidad', color_discrete_sequence=px.colors.qualitative.Vivid
-        )
-        fig_bar_siscat.update_layout(showlegend=False, xaxis_title="Número de Oficios", yaxis_title="")
+        fig_bar_siscat = px.bar(siscat_counts, x='Cantidad', y='Estatus', orientation='h', color='Estatus', text='Cantidad', color_discrete_sequence=px.colors.qualitative.Vivid)
         st.plotly_chart(fig_bar_siscat, use_container_width=True)
 
-    st.markdown("---")
-
-    g_col3, g_col4 = st.columns(2)
-
-    with g_col3:
-        st.subheader("🇲🇽 Top 10 Estados con Mayor Carga Registrada")
-        top_estados = df_filtered['estado'].value_counts().head(10).reset_index()
-        top_estados.columns = ['Estado', 'Oficios']
-        fig_top_estados = px.bar(
-            top_estados, x='Estado', y='Oficios', color='Oficios', text='Oficios', 
-            color_continuous_scale='Greens'
-        )
-        fig_top_estados.update_traces(textposition='inside', textfont_color='white')
-        fig_top_estados.update_layout(
-            xaxis_title="", yaxis_title="Total Oficios", 
-            coloraxis_showscale=False, xaxis_tickangle=-35
-        )
-        st.plotly_chart(fig_top_estados, use_container_width=True)
-
-    with g_col4:
-        st.subheader("📑 Volumetría por Tipo de Trámite")
-        
-        def inferir_tramite(row):
-            t_actual = str(row.get('tipo_tramite', '')).strip().upper()
-            if t_actual and t_actual not in ['NONE', 'NAN', '']:
-                return t_actual
-            
-            obs = str(row.get('observaciones', '')).upper()
-            scg = str(row.get('scg', '')).upper()
-            txt = obs + " " + scg
-            
-            if 'DESTINO' in txt: return 'CAMBIO DE DESTINO'
-            if 'SUPERFICIE' in txt: return 'CAMBIO DE SUPERFICIE'
-            if 'DOMINIO' in txt: return 'DOMINIO PLENO'
-            if 'MOSAICO' in txt: return 'ACT. DE MOSAICO'
-            if 'SENTENCIA' in txt: return 'SENTENCIA'
-            
-            return 'PENDIENTE DE CLASIFICAR'
-
-        tramites_series = df_filtered.apply(inferir_tramite, axis=1)
-        obs_counts = tramites_series.value_counts().reset_index()
-        obs_counts.columns = ['Trámite', 'Cantidad']
-        
-        fig_tramite_bar = px.bar(
-            obs_counts, x='Cantidad', y='Trámite', orientation='h', 
-            color='Cantidad', text='Cantidad', color_continuous_scale='blues'
-        )
-        fig_tramite_bar.update_layout(
-            xaxis_title="Número de Oficios", yaxis_title="", 
-            coloraxis_showscale=False, yaxis=dict(autorange="reversed")
-        )
-        st.plotly_chart(fig_tramite_bar, use_container_width=True)
-
 # -----------------------------------------------------------------------------
-# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
+# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO (Con Refresh Automático - Punto 2)
 # -----------------------------------------------------------------------------
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
-    st.caption("Todos los campos marcados con (*) son strictly OBLIGATORIOS.")
+    st.caption("Todos los campos marcados con (*) son estrictamente OBLIGATORIOS.")
 
     es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
-
     estados_list = get_estados()
     col_u1, col_u2, col_u3 = st.columns(3)
 
@@ -378,9 +291,9 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
     dgcat_check = dgcat_folio.strip().upper()
     id_existente = existe_folio_seguimiento(dgcat_check) if dgcat_check and dgcat_check != "DGCAT/100/" else None
     if id_existente:
-        st.info(f"ℹ️ Este folio ya existe (ID #{id_existente}). Al guardar se ACTUALIZARÁ ese registro en lugar de crear uno nuevo.")
+        st.info(f"ℹ️ Este folio ya existe (ID Interno #{id_existente}). Al guardar se ACTUALIZARÁ ese registro.")
 
-    with st.form("form_seguimiento_predio"):
+    with st.form("form_seguimiento_predio", clear_on_submit=True):
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             st.text_input("Folio DGCAT (confirmado)", value=dgcat_folio, disabled=True)
@@ -397,12 +310,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
             elif archivo_escaneado is None and not id_existente:
                 st.error("⚠️ Debe adjuntar un archivo PDF escaneado.")
             else:
-                obs_upper = observaciones_capturista.strip().upper() if observaciones_capturista else ""
-                estado_upper = estado_sel.strip().upper()
-                municipio_upper = municipio_sel.strip().upper()
-                ejido_upper = ejido_sel.strip().upper()
                 fecha_hoy = date.today().strftime('%d/%m/%Y')
-
                 nombre_archivo = None
                 if archivo_escaneado is not None:
                     dgcat_clean = dgcat_check.replace("/", "_").replace(" ", "")
@@ -412,16 +320,15 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 
                 datos = {
                     "dgcat": dgcat_check,
-                    "estado": estado_upper,
-                    "municipio": municipio_upper,
-                    "ejido": ejido_upper,
-                    "observaciones": obs_upper,
+                    "estado": estado_sel.strip().upper(),
+                    "municipio": municipio_sel.strip().upper(),
+                    "ejido": ejido_sel.strip().upper(),
+                    "observaciones": observaciones_capturista.strip().upper() if observaciones_capturista else "",
                     "registrado_por": st.session_state["username"],
                 }
                 if id_existente:
                     datos["fecha_actualizacion"] = fecha_hoy
-                    if nombre_archivo:
-                        datos["archivo_escaneado"] = nombre_archivo
+                    if nombre_archivo: datos["archivo_escaneado"] = nombre_archivo
                     ok, msg = guardar_seguimiento_predio(datos, id_registro=id_existente)
                 else:
                     datos["fecha_registro"] = fecha_hoy
@@ -430,13 +337,14 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     ok, msg = guardar_seguimiento_predio(datos)
 
                 if ok:
+                    st.cache_data.clear()
                     st.success(f"✅ {msg}")
-                    st.rerun()
+                    st.rerun() # Refresh automático
                 else:
                     st.error(f"❌ {msg}")
 
 # -----------------------------------------------------------------------------
-# 3. REGISTRO COMPLETO DE OFICIOS
+# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS (Con Refresh y Auditoría - Punto 1 y 10)
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -452,9 +360,9 @@ elif menu == "📝 Registro Completo de Oficios":
             st.warning("No hay registros en la base de datos.")
             st.stop()
 
-        df_oficios['display_name'] = "ID #" + df_oficios['id'].astype(str) + " | Folio: " + df_oficios['dgcat'].astype(str) + " | Oficio: " + df_oficios['no_oficio'].fillna('').astype(str)
+        df_oficios['display_name'] = "Folio: " + df_oficios['dgcat'].astype(str) + " | Oficio: " + df_oficios['no_oficio'].fillna('').astype(str) + " | Estado: " + df_oficios['estado'].fillna('').astype(str)
 
-        texto_busqueda = st.text_input("🔎 Buscar por folio DGCAT, No. de oficio o Estado (opcional):")
+        texto_busqueda = st.text_input("🔎 Buscar por folio DGCAT, No. de oficio o Estado:")
         df_busqueda = df_oficios
         if texto_busqueda.strip():
             patron = texto_busqueda.strip().upper()
@@ -464,22 +372,23 @@ elif menu == "📝 Registro Completo de Oficios":
                 df_oficios['estado'].astype(str).str.upper().str.contains(patron, na=False)
             ]
             if df_busqueda.empty:
-                st.warning("⚠️ No se encontró ningún oficio que coincida con la búsqueda.")
+                st.warning("⚠️ No se encontró ningún oficio que coincida.")
                 st.stop()
 
         opciones_oficios = df_busqueda['display_name'].tolist()
         seleccion = st.selectbox("🔍 Seleccione el Oficio:", opciones_oficios)
-        id_oficio_seleccionado = int(seleccion.split(" | ")[0].replace("ID #", ""))
-        oficio_sel = df_oficios[df_oficios['id'] == id_oficio_seleccionado].iloc[0]
+        idx_match = df_busqueda[df_busqueda['display_name'] == seleccion].index[0]
+        oficio_sel = df_busqueda.loc[idx_match]
 
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
-        st.error(f"⚠️ Eliminar oficio **{oficio_sel['dgcat']}** (ID #{oficio_sel['id']}).")
+        st.error(f"⚠️ Eliminar oficio **{oficio_sel['dgcat']}**.")
         confirmar = st.checkbox("Confirmo que deseo eliminar este registro de forma DEFINITIVA.")
         if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary", disabled=not confirmar):
-            ok, msg = eliminar_oficio(int(oficio_sel['id']))
+            ok, msg = eliminar_oficio(int(oficio_sel['id']), usuario_actual=st.session_state['username'])
             if ok:
+                st.cache_data.clear()
                 st.success(f"✅ {msg}")
-                st.rerun()
+                st.rerun() # Refresh automático tras eliminar
             else:
                 st.error(f"❌ {msg}")
         st.stop()
@@ -512,25 +421,18 @@ elif menu == "📝 Registro Completo de Oficios":
     id_excluir = int(oficio_sel['id']) if oficio_sel is not None else None
     id_duplicado = existe_folio_oficio(dgcat_check, excluir_id=id_excluir) if dgcat_check and dgcat_check != "DGCAT/100/" else None
     if modo_accion == "➕ Nuevo Registro" and id_duplicado:
-        st.warning(f"⚠️ El folio **{dgcat_check}** ya existe (ID #{id_duplicado}). Cambie a modo 'Modificar Registro Existente' para editarlo, o use un folio distinto.")
+        st.warning(f"⚠️ El folio **{dgcat_check}** ya existe. Cambie a 'Modificar Registro Existente' para editarlo.")
 
-    # Cargar opciones con la opción por defecto '-- Seleccione --'
-    scg_raw = pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
-    scg_options = ["-- Seleccione --"] + scg_raw
-
-    siscat_raw = pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
-    siscat_options = ["-- Seleccione --"] + siscat_raw
+    # Catálogos obligatorios con '-- Seleccione --'
+    scg_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
+    siscat_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
     
     try:
-        sistemas_or_raw = pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
-        if not sistemas_or_raw:
-            sistemas_or_raw = ["SISTEMAS", "OR"]
+        sistemas_or_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
     except Exception:
-        sistemas_or_raw = ["SISTEMAS", "OR"]
-    sistemas_or_options = ["-- Seleccione --"] + sistemas_or_raw
+        sistemas_or_options = ["-- Seleccione --", "SISTEMAS", "OR"]
 
-    tramite_raw = pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
-    tramite_options = ["-- Seleccione --"] + tramite_raw
+    tramite_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
 
     limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
 
@@ -541,7 +443,7 @@ elif menu == "📝 Registro Completo de Oficios":
     with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
         idx_scg = scg_options.index(oficio_sel['scg']) if (oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
         idx_siscat = siscat_options.index(oficio_sel['siscat']) if (oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
-        idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (oficio_sel is not None and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
+        idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (oficio_sel is not None and 'sistemas_or' in oficio_sel and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
         idx_tramite = tramite_options.index(oficio_sel['tipo_tramite']) if (oficio_sel is not None and oficio_sel['tipo_tramite'] in tramite_options) else 0
 
         col1, col2 = st.columns(2)
@@ -563,25 +465,14 @@ elif menu == "📝 Registro Completo de Oficios":
         btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
             if modo_accion == "➕ Nuevo Registro" and id_duplicado:
-                st.error(f"❌ No se guardó: el folio '{dgcat_check}' ya existe (ID #{id_duplicado}). Use 'Modificar Registro Existente'.")
+                st.error(f"❌ No se guardó: el folio '{dgcat_check}' ya existe.")
             elif not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido.")
             elif scg_sel == "-- Seleccione --" or siscat_sel == "-- Seleccione --" or sistemas_or_sel == "-- Seleccione --" or tipo_tramite == "-- Seleccione --":
-                st.error("⚠️ Debe seleccionar una opción válida en Bandeja SCG, Estatus SISCAT, SISTEMAS/OR y Tipo de Trámite.")
+                st.error("⚠️ Debe seleccionar una opción válida en los catálogos marcados con *.")
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
             else:
-                id_num_upper = id_num.strip().upper()
-                no_oficio_upper = no_oficio.strip().upper()
-                obs_upper = observaciones.strip().upper()
-                estado_upper = estado_sel.strip().upper()
-                municipio_upper = municipio_sel.strip().upper()
-                ejido_upper = ejido_sel.strip().upper()
-                scg_upper = scg_sel.strip().upper()
-                siscat_upper = siscat_sel.strip().upper()
-                sistemas_or_upper = sistemas_or_sel.strip().upper()
-                tramite_upper = tipo_tramite.strip().upper()
-
                 str_f_entrega = f_entrega.strftime('%d/%m/%Y')
                 str_f_recibido = f_recibido.strftime('%d/%m/%Y')
 
@@ -592,100 +483,142 @@ elif menu == "📝 Registro Completo de Oficios":
                         f.write(archivo_nuevo.getbuffer())
 
                 datos = {
-                    "id_registro": id_num_upper, "estado": estado_upper, "municipio": municipio_upper,
-                    "ejido": ejido_upper, "no_oficio": no_oficio_upper, "dgcat": dgcat_check,
+                    "id_registro": id_num.strip().upper(), "estado": estado_sel.strip().upper(), 
+                    "municipio": municipio_sel.strip().upper(), "ejido": ejido_sel.strip().upper(), 
+                    "no_oficio": no_oficio.strip().upper(), "dgcat": dgcat_check,
                     "fecha_entrega": str_f_entrega, "fecha_recibido": str_f_recibido,
-                    "scg": scg_upper, "siscat": siscat_upper, "sistemas_or": sistemas_or_upper,
-                    "tipo_tramite": tramite_upper, "observaciones": obs_upper,
+                    "scg": scg_sel.strip().upper(), "siscat": siscat_sel.strip().upper(), 
+                    "sistemas_or": sistemas_or_sel.strip().upper(), "tipo_tramite": tipo_tramite.strip().upper(), 
+                    "observaciones": observaciones.strip().upper(), "archivo_escaneado": archivo_final
                 }
+                
                 if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
-                    if archivo_final:
-                        datos["archivo_escaneado"] = archivo_final
-                    ok, msg = guardar_oficio(datos, id_oficio=int(oficio_sel['id']))
+                    ok, msg = guardar_oficio(datos, id_oficio=int(oficio_sel['id']), usuario_actual=st.session_state['username'])
                 else:
-                    datos["archivo_escaneado"] = archivo_final
-                    ok, msg = guardar_oficio(datos)
+                    ok, msg = guardar_oficio(datos, usuario_actual=st.session_state['username'])
 
                 if ok:
+                    st.cache_data.clear()
                     st.success(f"✅ {msg}")
-                    st.rerun()
+                    st.rerun() # Refresh automático
                 else:
                     st.error(f"❌ {msg}")
 
 # -----------------------------------------------------------------------------
-# 4. CONSULTA Y EXPEDIENTES
+# 4. CONSULTA DE EXPEDIENTES DGCAT Y DESCARGA (PAGINADO - Puntos 3 y 8)
 # -----------------------------------------------------------------------------
 elif menu == "🔍 Consulta y Expedientes":
     st.title("🔍 Consulta de Expedientes DGCAT y Descarga de PDF")
     
-    df_data = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
-    df_data.columns = [c.lower() for c in df_data.columns]
+    # Muestra Fecha Dinámica de Consulta (Punto 3.3)
+    fecha_actual_str = datetime.now().strftime('%d de %B de %Y')
+    st.markdown(f"**Información actualizada:** {fecha_actual_str}")
     
-    cols_order = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
-    cols_presentes = [c for c in cols_order if c in df_data.columns]
-    df_display = df_data[cols_presentes]
+    col_f1, col_f2, col_f3, col_f4 = st.columns([2, 1, 1, 1])
+    with col_f1:
+        txt_buscar = st.text_input("🔎 Buscar en catálogo:")
+    with col_f2:
+        page_size = st.selectbox("Registros por página:", [200, 300, 500], index=0)
+    with col_f3:
+        page_num = st.number_input("Página:", min_value=1, value=1, step=1)
 
-    for col in df_display.select_dtypes(include=['object']).columns:
-        df_display[col] = df_display[col].astype(str).str.upper()
+    df_data, total_recs, total_pags = obtener_oficios_paginados(page=page_num, page_size=page_size, busqueda=txt_buscar)
+    
+    st.caption(f"Mostrando página {page_num} de {total_pags} | Total de registros encontrados: {total_recs:,}")
 
-    st.dataframe(df_display, use_container_width=True)
-    
-    st.markdown("---")
-    st.subheader("📁 Visor y Descarga de Archivos PDF (Almacenados en carpeta uploads/)")
-    
-    df_pdfs = df_display[df_display['archivo_escaneado'].notna() & (df_display['archivo_escaneado'] != '') & (df_display['archivo_escaneado'] != 'NONE')]
-    if not df_pdfs.empty:
-        col_pdf1, col_pdf2 = st.columns([2, 1])
-        with col_pdf1:
-            pdf_sel_name = st.selectbox("Seleccione el archivo PDF registrado a consultar:", df_pdfs['archivo_escaneado'].unique())
-        with col_pdf2:
-            st.write("<br>", unsafe_allow_html=True)
-            pdf_path = os.path.join(UPLOADS_DIR, pdf_sel_name)
-            if os.path.exists(pdf_path):
-                with open(pdf_path, "rb") as f:
-                    st.download_button("📥 Descargar PDF Escaneado", f, file_name=pdf_sel_name, mime="application/pdf", type="primary")
-            else:
-                st.warning("⚠️ El archivo no se localizó físicamente en la carpeta uploads/.")
+    if not df_data.empty:
+        # OCULTAR COLUMNA ID INTERNA (Punto 3.1)
+        cols_order = ['id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
+        cols_presentes = [c for c in cols_order if c in df_data.columns]
+        df_display = df_data[cols_presentes]
+
+        for col in df_display.select_dtypes(include=['object']).columns:
+            df_display[col] = df_display[col].astype(str).str.upper()
+
+        st.dataframe(df_display, use_container_width=True)
     else:
-        st.info("ℹ️ No hay archivos PDF adjuntos registrados.")
+        st.warning("No se encontraron registros con los filtros aplicados.")
 
     st.markdown("---")
-    excel_file = generar_excel_ejecutivo(df_display)
-    with open(excel_file, "rb") as f:
-        st.download_button("📊 Descargar Reporte Ejecutivo en Excel (.xlsx)", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.subheader("📁 Visor y Descarga de Expedientes PDF")
+    
+    # Manejo Seguro de Visor y Archivos Inexistentes (Punto 3.4 y 3.5)
+    if not df_data.empty and 'archivo_escaneado' in df_data.columns:
+        df_pdfs = df_data[df_data['archivo_escaneado'].notna() & (df_data['archivo_escaneado'] != '') & (df_data['archivo_escaneado'] != 'NONE')]
+        if not df_pdfs.empty:
+            col_pdf1, col_pdf2 = st.columns([2, 1])
+            with col_pdf1:
+                pdf_sel_name = st.selectbox("Seleccione el archivo PDF registrado a consultar:", df_pdfs['archivo_escaneado'].unique())
+            with col_pdf2:
+                st.write("<br>", unsafe_allow_html=True)
+                pdf_path = os.path.join(UPLOADS_DIR, pdf_sel_name)
+                if os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as f:
+                        st.download_button("📥 Descargar PDF Escaneado", f, file_name=pdf_sel_name, mime="application/pdf", type="primary")
+                else:
+                    st.warning("⚠️ Favor de subir el oficio.")
+        else:
+            st.info("ℹ️ Favor de subir el oficio.")
+
+    st.markdown("---")
+    if st.button("📊 Generar Reporte Ejecutivo Excel"):
+        df_exp = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
+        excel_file = generar_excel_ejecutivo(df_exp)
+        with open(excel_file, "rb") as f:
+            st.download_button("📥 Descargar Excel", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -----------------------------------------------------------------------------
-# 4B. CONSULTA DE SEGUIMIENTO DE UBICACIÓN DE PREDIO
+# 5. CONSULTA DE SEGUIMIENTO DE PREDIO (Con Paginación - Punto 5)
 # -----------------------------------------------------------------------------
 elif menu == "🗂️ Consulta de Seguimiento de Predio":
     st.title("🗂️ Consulta de Seguimiento de Ubicación de Predio")
 
-    try:
-        df_seg = pd.read_sql("SELECT * FROM seguimiento_predio ORDER BY id DESC", engine)
-    except Exception:
-        df_seg = pd.DataFrame(columns=[
-            'id', 'dgcat', 'estado', 'municipio', 'ejido', 
-            'fecha_registro', 'fecha_actualizacion', 'observaciones', 
-            'archivo_escaneado', 'registrado_por'
-        ])
+    fecha_actual_str = datetime.now().strftime('%d de %B de %Y')
+    st.markdown(f"**Información actualizada:** {fecha_actual_str}")
 
-    df_seg.columns = [c.lower() for c in df_seg.columns]
+    col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
+    with col_s1:
+        txt_buscar_seg = st.text_input("🔎 Buscar seguimiento:")
+    with col_s2:
+        page_size_seg = st.selectbox("Registros por página:", [200, 300, 500], key="ps_seg")
+    with col_s3:
+        page_num_seg = st.number_input("Página:", min_value=1, value=1, step=1, key="pn_seg")
 
-    cols_order_seg = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'fecha_actualizacion', 'observaciones', 'archivo_escaneado', 'registrado_por']
-    cols_presentes_seg = [c for c in cols_order_seg if c in df_seg.columns]
-    df_seg_display = df_seg[cols_presentes_seg]
+    df_seg, total_recs_s, total_pags_s = obtener_seguimiento_paginado(page=page_num_seg, page_size=page_size_seg, busqueda=txt_buscar_seg)
+    st.caption(f"Mostrando página {page_num_seg} de {total_pags_s} | Total de registros: {total_recs_s:,}")
 
-    for col in df_seg_display.select_dtypes(include=['object']).columns:
-        df_seg_display[col] = df_seg_display[col].astype(str).str.upper()
+    if not df_seg.empty:
+        # OCULTAR COLUMNA ID (Punto 5)
+        cols_order_seg = ['dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'fecha_actualizacion', 'observaciones', 'archivo_escaneado', 'registrado_por']
+        cols_presentes_seg = [c for c in cols_order_seg if c in df_seg.columns]
+        df_seg_display = df_seg[cols_presentes_seg]
 
-    st.dataframe(df_seg_display, use_container_width=True)
+        for col in df_seg_display.select_dtypes(include=['object']).columns:
+            df_seg_display[col] = df_seg_display[col].astype(str).str.upper()
+
+        st.dataframe(df_seg_display, use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("📁 Archivo PDF de Seguimiento")
+        df_seg_pdf = df_seg[df_seg['archivo_escaneado'].notna() & (df_seg['archivo_escaneado'] != '')]
+        if not df_seg_pdf.empty:
+            pdf_seg_sel = st.selectbox("Seleccionar expediente de seguimiento:", df_seg_pdf['archivo_escaneado'].unique())
+            pdf_seg_path = os.path.join(UPLOADS_DIR, pdf_seg_sel)
+            if os.path.exists(pdf_seg_path):
+                with open(pdf_seg_path, "rb") as f:
+                    st.download_button("📥 Descargar PDF", f, file_name=pdf_seg_sel, mime="application/pdf")
+            else:
+                st.warning("⚠️ Favor de subir el oficio.")
+        else:
+            st.info("ℹ️ Favor de subir el oficio.")
+    else:
+        st.warning("No hay registros de seguimiento.")
 
 # -----------------------------------------------------------------------------
-# 5. GESTIÓN DE CATÁLOGOS
+# 6. GESTIÓN DE CATÁLOGOS
 # -----------------------------------------------------------------------------
 elif menu == "⚙️ Gestión de Catálogos":
     st.title("⚙️ Administración de Catálogos Dinámicos")
-    
     t1, t2, t3, t4 = st.tabs(["Catálogo SCG", "Catálogo SISCAT", "SISTEMAS/OR", "Tipos de Trámite"])
     
     def render_catalogo_produccion(tabla_db, label_catalogo):
@@ -700,83 +633,45 @@ elif menu == "⚙️ Gestión de Catálogos":
         st.subheader(f"Opciones Actuales de {label_catalogo}")
         st.dataframe(df_opts, use_container_width=True)
         
-        st.markdown("<br>", unsafe_allow_html=True)
-        
         col_crear, _ = st.columns([2, 1])
         with col_crear:
             with st.form(key=f"form_add_{tabla_db}", clear_on_submit=True):
                 nueva_opcion = st.text_input(f"Nueva Opción para {label_catalogo}")
-                btn_guardar = st.form_submit_button(f"Guardar Opción {label_catalogo}")
-                
-                if btn_guardar:
+                if st.form_submit_button(f"Guardar Opción {label_catalogo}"):
                     if nueva_opcion.strip():
                         val_clean = nueva_opcion.strip().upper()
                         try:
                             with engine.begin() as conn:
-                                if engine.url.drivername == 'sqlite':
-                                    conn.execute(text(f"INSERT OR IGNORE INTO {tabla_db} (nombre) VALUES (:n)"), {"n": val_clean})
-                                else:
-                                    conn.execute(text(f"INSERT INTO {tabla_db} (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": val_clean})
+                                conn.execute(text(f"INSERT INTO {tabla_db} (nombre) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": val_clean})
                             st.cache_data.clear()
-                            st.success(f"✅ Opción '{val_clean}' guardada con éxito.")
+                            st.success(f"✅ Opción '{val_clean}' guardada.")
                             st.rerun()
                         except Exception as err:
-                            st.error(f"Error al guardar: {err}")
-                    else:
-                        st.warning("⚠️ Ingrese un nombre válido.")
+                            st.error(f"Error: {err}")
 
         st.markdown("---")
-
         if options:
-            st.subheader(f"✏️ Modificar o 🗑️ Eliminar Opción de {label_catalogo}")
-            placeholder_opcion = "-- Seleccione un elemento --"
-            opciones_con_placeholder = [placeholder_opcion] + options
-            
-            opcion_sel = st.selectbox(
-                f"Seleccione elemento a gestionar:", 
-                opciones_con_placeholder, 
-                key=f"sel_{tabla_db}"
-            )
+            st.subheader(f"✏️ Modificar o 🗑️ Eliminar Opción")
+            opcion_sel = st.selectbox(f"Seleccione elemento:", ["-- Seleccione --"] + options, key=f"sel_{tabla_db}")
 
             with st.form(key=f"form_edit_{tabla_db}", clear_on_submit=True):
-                nuevo_nombre = st.text_input(
-                    "Nuevo nombre para modificar:", 
-                    placeholder="Escriba el nombre en mayúsculas..."
-                )
-                
+                nuevo_nombre = st.text_input("Nuevo nombre para modificar:")
                 col_b1, col_b2, _ = st.columns([1, 1, 2])
-                with col_b1:
-                    btn_modificar = st.form_submit_button("✏️ Guardar Modificación", use_container_width=True)
-                with col_b2:
-                    btn_eliminar = st.form_submit_button("🗑️ Eliminar Opción", type="primary", use_container_width=True)
+                with col_b1: btn_mod = st.form_submit_button("✏️ Guardar Modificación")
+                with col_b2: btn_eli = st.form_submit_button("🗑️ Eliminar Opción", type="primary")
 
-                if btn_modificar:
-                    if opcion_sel == placeholder_opcion:
-                        st.warning("⚠️ Debe seleccionar un elemento.")
-                    elif not nuevo_nombre.strip():
-                        st.warning("⚠️ Escriba el nuevo nombre.")
-                    else:
-                        nuevo_clean = nuevo_nombre.strip().upper()
-                        ok, msg = actualizar_opcion_catalogo(tabla_db, opcion_sel, nuevo_clean)
-                        if ok:
-                            st.cache_data.clear()
-                            st.success(f"✅ Modificado correctamente a '{nuevo_clean}'.")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-                if btn_eliminar:
-                    if opcion_sel == placeholder_opcion:
-                        st.warning("⚠️ Debe seleccionar un elemento.")
-                    else:
-                        n_afectados = contar_oficios_con_valor_catalogo(tabla_db, opcion_sel)
-                        ok, msg = eliminar_opcion_catalogo(tabla_db, opcion_sel)
-                        if ok:
-                            aviso = f" ⚠️ {n_afectados} oficio(s) ya capturados seguían usando este valor y ahora quedará fuera del catálogo." if n_afectados else ""
-                            st.success(f"✅ Eliminado correctamente.{aviso}")
-                            st.rerun()
-                        else:
-                            st.error(msg)
+                if btn_mod and opcion_sel != "-- Seleccione --" and nuevo_nombre.strip():
+                    ok, msg = actualizar_opcion_catalogo(tabla_db, opcion_sel, nuevo_nombre.strip().upper())
+                    if ok:
+                        st.cache_data.clear()
+                        st.success(f"✅ {msg}")
+                        st.rerun()
+                if btn_eli and opcion_sel != "-- Seleccione --":
+                    ok, msg = eliminar_opcion_catalogo(tabla_db, opcion_sel)
+                    if ok:
+                        st.cache_data.clear()
+                        st.success(f"✅ {msg}")
+                        st.rerun()
 
     with t1: render_catalogo_produccion("cat_scg", "SCG")
     with t2: render_catalogo_produccion("cat_siscat", "SISCAT")
@@ -784,9 +679,14 @@ elif menu == "⚙️ Gestión de Catálogos":
     with t4: render_catalogo_produccion("cat_tramite", "Tipos de Trámite")
 
 # -----------------------------------------------------------------------------
-# 6. ALTA DE USUARIOS
+# 7. GESTIÓN COMPLETA DE USUARIOS (Con Seguridad Backend - Punto 6 y 7)
 # -----------------------------------------------------------------------------
 elif menu == "👥 Alta de Usuarios":
+    # Validación Backend Estricta de Rol (Punto 7)
+    if st.session_state["rol"] != "admin":
+        st.error("⛔ ACCESO NO AUTORIZADO: Este módulo requiere privilegios de Administrador.")
+        st.stop()
+
     st.title("👥 Gestión Completa de Usuarios")
     
     col_u1, col_u2 = st.columns([1.1, 1.2])
@@ -806,11 +706,32 @@ elif menu == "👥 Alta de Usuarios":
                     if exito:
                         st.cache_data.clear()
                         st.success(msg)
-                        st.rerun()
+                        st.rerun() # Refresh automático
                     else:
                         st.error(msg)
 
     with col_u2:
-        st.write("### 📋 Directorio de Usuarios")
+        st.write("### 📋 Directorio y Control de Usuarios")
         df_users = pd.read_sql("SELECT username, nombre_completo, rol FROM usuarios", engine)
         st.dataframe(df_users, use_container_width=True)
+
+        st.markdown("---")
+        st.write("### 🔑 Modificar / Restablecer Contraseña")
+        lista_usr = df_users['username'].tolist() if not df_users.empty else []
+        usr_mod = st.selectbox("Usuario a modificar:", ["-- Seleccione --"] + lista_usr)
+        pwd_nueva = st.text_input("Nueva contraseña:", type="password")
+
+        if st.button("🔄 Actualizar Contraseña") and usr_mod != "-- Seleccione --" and pwd_nueva:
+            ok, msg = cambiar_password_usuario(usr_mod, pwd_nueva)
+            if ok:
+                st.success(f"✅ {msg}")
+                st.rerun() # Refresh automático (Punto 6)
+
+        st.markdown("---")
+        st.write("### 🗑️ Eliminar Usuario")
+        usr_del = st.selectbox("Usuario a eliminar:", ["-- Seleccione --"] + [u for u in lista_usr if u.lower() != 'admin' and u.lower() != st.session_state['username'].lower()])
+        if st.button("❌ Eliminar Usuario", type="primary") and usr_del != "-- Seleccione --":
+            ok, msg = eliminar_usuario(usr_del)
+            if ok:
+                st.success(f"✅ {msg}")
+                st.rerun() # Refresh automático y limpia selección (Punto 6)
