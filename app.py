@@ -450,11 +450,11 @@ elif menu == "📝 Registro Completo de Oficios":
         with col1:
             id_num = st.text_input("ID Numérico", value=val_id_reg)
             no_oficio = st.text_input("NO. OFICIO", value=val_no_oficio)
-            f_entrega = st.date_input("FECHA DE ENTREGA (DD/MM/AAAA)", value=date.today(), format="DD/MM/YYYY")
+            f_entrega = st.date_input("FECHA DE ENTREGA", value=date.today(), format="DD/MM/YYYY")
             scg_sel = st.selectbox("Bandeja SCG *", scg_options, index=idx_scg)
 
         with col2:
-            f_recibido = st.date_input("FECHA DE RECIBIDO (DD/MM/AAAA)", value=date.today(), format="DD/MM/YYYY")
+            f_recibido = st.date_input("FECHA DE RECIBIDO", value=date.today(), format="DD/MM/YYYY")
             siscat_sel = st.selectbox("Estatus SISCAT *", siscat_options, index=idx_siscat)
             sistemas_or_sel = st.selectbox("SISTEMAS/OR *", sistemas_or_options, index=idx_sistemas_or)
             tipo_tramite = st.selectbox("TIPO DE TRÁMITE *", tramite_options, index=idx_tramite)
@@ -473,8 +473,9 @@ elif menu == "📝 Registro Completo de Oficios":
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
             else:
-                str_f_entrega = f_entrega.strftime('%d/%m/%Y')
-                str_f_recibido = f_recibido.strftime('%d/%m/%Y')
+                # Convertir las fechas al formato ISO (YYYY-MM-DD) para que PostgreSQL las acepte sin error
+                str_f_entrega = f_entrega.strftime('%Y-%m-%d') if f_entrega else None
+                str_f_recibido = f_recibido.strftime('%Y-%m-%d') if f_recibido else None
 
                 archivo_final = ""
                 if archivo_nuevo is not None:
@@ -566,7 +567,10 @@ elif menu == "🔍 Consulta y Expedientes":
         excel_file = generar_excel_ejecutivo(df_exp)
         with open(excel_file, "rb") as f:
             st.download_button("📥 Descargar Excel", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
+# Formatear columnas de fecha para visualización en pantalla (DD/MM/AAAA)
+for col_fecha in ['fecha_entrega', 'fecha_recibido']:
+    if col_fecha in df_display.columns:
+        df_display[col_fecha] = pd.to_datetime(df_display[col_fecha], errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
 # -----------------------------------------------------------------------------
 # 5. CONSULTA DE SEGUIMIENTO DE PREDIO (Con Paginación - Punto 5)
 # -----------------------------------------------------------------------------
