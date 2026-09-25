@@ -354,10 +354,15 @@ elif menu == "📝 Registro Completo de Oficios":
 
     modo_accion = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True)
 
-    # Limpiar estado si se selecciona un Nuevo Registro para evitar heredar folios anteriores
+    # 1. Gestionar el estado del folio para evitar cierres o reinicios accidentales
+    if "dgcat_registro_completo" not in st.session_state:
+        st.session_state["dgcat_registro_completo"] = "DGCAT/100/"
+
     if modo_accion == "➕ Nuevo Registro":
-        if "dgcat_registro_completo" in st.session_state and st.session_state["dgcat_registro_completo"] != "DGCAT/100/":
+        # Si venía de una modificación previa, reiniciar el folio al cambiar a Nuevo Registro
+        if st.session_state.get("last_modo") != "➕ Nuevo Registro":
             st.session_state["dgcat_registro_completo"] = "DGCAT/100/"
+    st.session_state["last_modo"] = modo_accion
 
     oficio_sel = None
     if modo_accion in ["✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"]:
@@ -384,6 +389,10 @@ elif menu == "📝 Registro Completo de Oficios":
         seleccion = st.selectbox("🔍 Seleccione el Oficio:", opciones_oficios)
         idx_match = df_busqueda[df_busqueda['display_name'] == seleccion].index[0]
         oficio_sel = df_busqueda.loc[idx_match]
+        
+        # Asignar el folio seleccionado al estado
+        if oficio_sel is not None and pd.notna(oficio_sel['dgcat']):
+            st.session_state["dgcat_registro_completo"] = str(oficio_sel['dgcat'])
 
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
         st.error(f"⚠️ Eliminar oficio **{oficio_sel['dgcat']}**.")
@@ -419,20 +428,7 @@ elif menu == "📝 Registro Completo de Oficios":
         def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
         with col_u3: ejido_sel = st.selectbox("3. Ejido", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx)
 
-    # Asignación correcta del Folio DGCAT según el modo
-    if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
-        val_dgcat = str(oficio_sel['dgcat']) if pd.notna(oficio_sel['dgcat']) else "DGCAT/100/"
-    else:
-        val_dgcat = "DGCAT/100/"
-
-    dgcat_folio = st.text_input("Folio DGCAT", value=val_dgcat, key="dgcat_registro_completo")
-
-    dgcat_check = dgcat_folio.strip().upper()
-    id_excluir = int(oficio_sel['id']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else None
-    id_duplicado = existe_folio_oficio(dgcat_check, excluir_id=id_excluir) if dgcat_check and dgcat_check != "DGCAT/100/" else None
-    
-    if modo_accion == "➕ Nuevo Registro" and id_duplicado:
-        st.warning(f"⚠️ El folio **{dgcat_check}** ya existe. Cambie a 'Modificar Registro Existente' para editarlo.")
+    st.markdown("---")
 
     # Catálogos obligatorios con '-- Seleccione --'
     scg_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
@@ -445,13 +441,16 @@ elif menu == "📝 Registro Completo de Oficios":
 
     tramite_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_tramite ORDER BY nombre", engine)['nombre'].tolist()
 
-    limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
-
     val_id_reg = str(oficio_sel['id_registro']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['id_registro'])) else ""
     val_no_oficio = str(oficio_sel['no_oficio']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['no_oficio'])) else ""
     val_obs = str(oficio_sel['observaciones']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['observaciones'])) else ""
 
+    limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
+
+    # 2. Todo el formulario unificado dentro de st.form
     with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
+        dgcat_folio = st.text_input("Folio DGCAT *", value=st.session_state["dgcat_registro_completo"])
+
         idx_scg = scg_options.index(oficio_sel['scg']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
         idx_siscat = siscat_options.index(oficio_sel['siscat']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
         idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and 'sistemas_or' in oficio_sel and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
@@ -475,6 +474,10 @@ elif menu == "📝 Registro Completo de Oficios":
 
         btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
+            dgcat_check = dgcat_folio.strip().upper()
+            id_excluir = int(oficio_sel['id']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else None
+            id_duplicado = existe_folio_oficio(dgcat_check, excluir_id=id_excluir) if dgcat_check and dgcat_check != "DGCAT/100/" else None
+
             if modo_accion == "➕ Nuevo Registro" and id_duplicado:
                 st.error(f"❌ No se guardó: el folio '{dgcat_check}' ya existe.")
             elif not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
@@ -510,11 +513,11 @@ elif menu == "📝 Registro Completo de Oficios":
 
                 if ok:
                     st.cache_data.clear()
+                    st.session_state["dgcat_registro_completo"] = "DGCAT/100/"
                     st.success(f"✅ {msg}")
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
-
 # -----------------------------------------------------------------------------
 # 4. CONSULTA DE EXPEDIENTES DGCAT Y DESCARGA
 # -----------------------------------------------------------------------------
