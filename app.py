@@ -354,6 +354,11 @@ elif menu == "📝 Registro Completo de Oficios":
 
     modo_accion = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True)
 
+    # Limpiar estado si se selecciona un Nuevo Registro para evitar heredar folios anteriores
+    if modo_accion == "➕ Nuevo Registro":
+        if "dgcat_registro_completo" in st.session_state and st.session_state["dgcat_registro_completo"] != "DGCAT/100/":
+            st.session_state["dgcat_registro_completo"] = "DGCAT/100/"
+
     oficio_sel = None
     if modo_accion in ["✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"]:
         if df_oficios.empty:
@@ -403,23 +408,29 @@ elif menu == "📝 Registro Completo de Oficios":
         with col_u2: st.text_input("2. Municipio", value="OFICINAS CENTRALES", disabled=True)
         with col_u3: st.text_input("3. Ejido", value="OFICINAS CENTRALES", disabled=True)
     else:
-        def_estado_idx = estados_list.index(oficio_sel['estado']) + 1 if (oficio_sel is not None and oficio_sel['estado'] in estados_list) else 0
+        def_estado_idx = estados_list.index(oficio_sel['estado']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['estado'] in estados_list) else 0
         with col_u1: estado_sel = st.selectbox("1. Estado", ["-- Seleccione --"] + estados_list, index=def_estado_idx)
 
         muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
-        def_mun_idx = muns_list.index(oficio_sel['municipio']) + 1 if (oficio_sel is not None and oficio_sel['municipio'] in muns_list) else 0
+        def_mun_idx = muns_list.index(oficio_sel['municipio']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['municipio'] in muns_list) else 0
         with col_u2: municipio_sel = st.selectbox("2. Municipio", ["-- Seleccione --"] + muns_list, index=def_mun_idx)
 
         ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
-        def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
+        def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
         with col_u3: ejido_sel = st.selectbox("3. Ejido", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx)
 
-    val_dgcat = str(oficio_sel['dgcat']) if (oficio_sel is not None and pd.notna(oficio_sel['dgcat'])) else "DGCAT/100/"
+    # Asignación correcta del Folio DGCAT según el modo
+    if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
+        val_dgcat = str(oficio_sel['dgcat']) if pd.notna(oficio_sel['dgcat']) else "DGCAT/100/"
+    else:
+        val_dgcat = "DGCAT/100/"
+
     dgcat_folio = st.text_input("Folio DGCAT", value=val_dgcat, key="dgcat_registro_completo")
 
     dgcat_check = dgcat_folio.strip().upper()
-    id_excluir = int(oficio_sel['id']) if oficio_sel is not None else None
+    id_excluir = int(oficio_sel['id']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None) else None
     id_duplicado = existe_folio_oficio(dgcat_check, excluir_id=id_excluir) if dgcat_check and dgcat_check != "DGCAT/100/" else None
+    
     if modo_accion == "➕ Nuevo Registro" and id_duplicado:
         st.warning(f"⚠️ El folio **{dgcat_check}** ya existe. Cambie a 'Modificar Registro Existente' para editarlo.")
 
@@ -436,15 +447,15 @@ elif menu == "📝 Registro Completo de Oficios":
 
     limpiar_al_guardar = True if modo_accion == "➕ Nuevo Registro" else False
 
-    val_id_reg = str(oficio_sel['id_registro']) if (oficio_sel is not None and pd.notna(oficio_sel['id_registro'])) else ""
-    val_no_oficio = str(oficio_sel['no_oficio']) if (oficio_sel is not None and pd.notna(oficio_sel['no_oficio'])) else ""
-    val_obs = str(oficio_sel['observaciones']) if (oficio_sel is not None and pd.notna(oficio_sel['observaciones'])) else ""
+    val_id_reg = str(oficio_sel['id_registro']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['id_registro'])) else ""
+    val_no_oficio = str(oficio_sel['no_oficio']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['no_oficio'])) else ""
+    val_obs = str(oficio_sel['observaciones']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and pd.notna(oficio_sel['observaciones'])) else ""
 
     with st.form("form_oficio_admin", clear_on_submit=limpiar_al_guardar):
-        idx_scg = scg_options.index(oficio_sel['scg']) if (oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
-        idx_siscat = siscat_options.index(oficio_sel['siscat']) if (oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
-        idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (oficio_sel is not None and 'sistemas_or' in oficio_sel and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
-        idx_tramite = tramite_options.index(oficio_sel['tipo_tramite']) if (oficio_sel is not None and oficio_sel['tipo_tramite'] in tramite_options) else 0
+        idx_scg = scg_options.index(oficio_sel['scg']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
+        idx_siscat = siscat_options.index(oficio_sel['siscat']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
+        idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and 'sistemas_or' in oficio_sel and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
+        idx_tramite = tramite_options.index(oficio_sel['tipo_tramite']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['tipo_tramite'] in tramite_options) else 0
 
         col1, col2 = st.columns(2)
         with col1:
@@ -473,7 +484,6 @@ elif menu == "📝 Registro Completo de Oficios":
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
             else:
-                # Formato ISO (YYYY-MM-DD) para compatibilidad con PostgreSQL
                 str_f_entrega = f_entrega.strftime('%Y-%m-%d') if f_entrega else None
                 str_f_recibido = f_recibido.strftime('%Y-%m-%d') if f_recibido else None
 
