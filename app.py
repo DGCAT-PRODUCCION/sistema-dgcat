@@ -373,20 +373,23 @@ elif menu == "📝 Registro Completo de Oficios":
 
     modo_accion = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True)
 
-    # Inicializar claves de control de ubicación en session_state si no existen
+    # Inicializar claves de control de ubicación y checkbox en session_state si no existen
     if "key_estado" not in st.session_state:
         st.session_state["key_estado"] = "-- Seleccione --"
     if "key_municipio" not in st.session_state:
         st.session_state["key_municipio"] = "-- Seleccione --"
     if "key_ejido" not in st.session_state:
         st.session_state["key_ejido"] = "-- Seleccione --"
+    if "chk_centrales_of" not in st.session_state:
+        st.session_state["chk_centrales_of"] = False
 
-    # Si cambia de modo, reiniciar el formulario
+    # Si cambia de modo, reiniciar el formulario por completo
     if st.session_state.get("last_modo_oficios") != modo_accion:
         st.session_state["last_modo_oficios"] = modo_accion
         st.session_state["key_estado"] = "-- Seleccione --"
         st.session_state["key_municipio"] = "-- Seleccione --"
         st.session_state["key_ejido"] = "-- Seleccione --"
+        st.session_state["chk_centrales_of"] = False
         st.rerun()
 
     oficio_sel = None
@@ -415,13 +418,17 @@ elif menu == "📝 Registro Completo de Oficios":
         idx_match = df_busqueda[df_busqueda['display_name'] == seleccion].index[0]
         oficio_sel = df_busqueda.loc[idx_match]
 
-        # Si se selecciona un oficio a editar, precargar las ubicaciones en session_state
+        # Precargar ubicación al editar
         if oficio_sel is not None:
             if "loaded_oficio_id" not in st.session_state or st.session_state["loaded_oficio_id"] != oficio_sel['id']:
                 st.session_state["loaded_oficio_id"] = oficio_sel['id']
-                st.session_state["key_estado"] = oficio_sel['estado'] if pd.notna(oficio_sel['estado']) else "-- Seleccione --"
-                st.session_state["key_municipio"] = oficio_sel['municipio'] if pd.notna(oficio_sel['municipio']) else "-- Seleccione --"
-                st.session_state["key_ejido"] = oficio_sel['ejido'] if pd.notna(oficio_sel['ejido']) else "-- Seleccione --"
+                if oficio_sel['estado'] == "OFICINAS CENTRALES":
+                    st.session_state["chk_centrales_of"] = True
+                else:
+                    st.session_state["chk_centrales_of"] = False
+                    st.session_state["key_estado"] = oficio_sel['estado'] if pd.notna(oficio_sel['estado']) else "-- Seleccione --"
+                    st.session_state["key_municipio"] = oficio_sel['municipio'] if pd.notna(oficio_sel['municipio']) else "-- Seleccione --"
+                    st.session_state["key_ejido"] = oficio_sel['ejido'] if pd.notna(oficio_sel['ejido']) else "-- Seleccione --"
                 st.rerun()
 
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
@@ -434,14 +441,21 @@ elif menu == "📝 Registro Completo de Oficios":
                 st.session_state["key_estado"] = "-- Seleccione --"
                 st.session_state["key_municipio"] = "-- Seleccione --"
                 st.session_state["key_ejido"] = "-- Seleccione --"
+                st.session_state["chk_centrales_of"] = False
                 st.success(f"✅ {msg}")
                 st.rerun()
             else:
                 st.error(f"❌ {msg}")
         st.stop()
 
-    # --- SECCIÓN DE UBICACIÓN (FUERA DEL FORM PARA REACTIVIDAD EN TIEMPO REAL) ---
-    es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
+    # --- SECCIÓN DE UBICACIÓN REACTIVA ---
+    es_oficinas_centrales_admin = st.checkbox(
+        "🏢 Trámite Perteneciente a OFICINAS CENTRALES",
+        value=st.session_state["chk_centrales_of"],
+        key="chk_centrales_input"
+    )
+    st.session_state["chk_centrales_of"] = es_oficinas_centrales_admin
+
     estados_list = get_estados()
 
     if es_oficinas_centrales_admin:
@@ -499,7 +513,7 @@ elif menu == "📝 Registro Completo de Oficios":
         init_no_oficio = ""
         init_obs = ""
 
-    # FORMULARIO PARA DATOS DEL OFICIO Y ARCHIVOS
+    # FORMULARIO DE CAPTURA
     with st.form("form_oficio_admin", clear_on_submit=True):
         dgcat_folio = st.text_input("Folio DGCAT *", value=init_dgcat)
 
@@ -562,10 +576,11 @@ elif menu == "📝 Registro Completo de Oficios":
 
                 if ok:
                     st.cache_data.clear()
-                    # Resetear las ubicaciones al guardar exitosamente
+                    # Resetear las ubicaciones Y la casilla de Oficinas Centrales
                     st.session_state["key_estado"] = "-- Seleccione --"
                     st.session_state["key_municipio"] = "-- Seleccione --"
                     st.session_state["key_ejido"] = "-- Seleccione --"
+                    st.session_state["chk_centrales_of"] = False
                     st.success(f"✅ {msg}")
                     st.rerun()
                 else:
