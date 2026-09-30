@@ -281,39 +281,45 @@ if menu == "📈 Dashboard Ejecutivo":
         st.plotly_chart(fig_obs, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO (Estructura Lineal de Columna Única)
+# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
     st.caption("Todos los campos marcados con (*) y el Expediente PDF son ESTRICTAMENTE OBLIGATORIOS.")
 
-    es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
+    if "reset_count_seg" not in st.session_state:
+        st.session_state["reset_count_seg"] = 0
+
+    cnt_s = st.session_state["reset_count_seg"]
+
     estados_list = get_estados()
 
-    if es_oficinas_centrales:
-        estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
-        st.text_input("1. Estado *", value="OFICINAS CENTRALES", disabled=True)
-        st.text_input("2. Municipio *", value="OFICINAS CENTRALES", disabled=True)
-        st.text_input("3. Ejido *", value="OFICINAS CENTRALES", disabled=True)
-    else:
-        estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list)
-        muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
-        municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list)
-        ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
-        ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list)
-
-    st.markdown("---")
-
     with st.form("form_seguimiento_predio", clear_on_submit=True):
-        dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/", key="key_seg_dgcat")
+        es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_seg_{cnt_s}")
+
+        if es_oficinas_centrales:
+            estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
+            st.text_input("1. Estado *", value="OFICINAS CENTRALES", disabled=True)
+            st.text_input("2. Municipio *", value="OFICINAS CENTRALES", disabled=True)
+            st.text_input("3. Ejido *", value="OFICINAS CENTRALES", disabled=True)
+        else:
+            estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, key=f"edo_seg_{cnt_s}")
+            muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
+            municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, key=f"mun_seg_{cnt_s}")
+            ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
+            ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, key=f"eji_seg_{cnt_s}")
+
+        st.markdown("---")
+
+        dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/", key=f"key_seg_dgcat_{cnt_s}")
         dgcat_check = dgcat_folio.strip().upper()
         
         id_existente = existe_folio_seguimiento(dgcat_check) if dgcat_check and dgcat_check != "DGCAT/100/" else None
         if id_existente:
             st.info(f"ℹ️ Este folio ya existe (ID Interno #{id_existente}). Al guardar se ACTUALIZARÁ ese registro.")
 
-        archivo_escaneado = st.file_uploader("Adjuntar Expediente Escaneado (PDF) * [RESTRICCIÓN OBLIGATORIA]", type=["pdf"])
-        observaciones_capturista = st.text_area("Observaciones (Opcional)")
+        archivo_escaneado = st.file_uploader("Adjuntar Expediente Escaneado (PDF) * [RESTRICCIÓN OBLIGATORIA]", type=["pdf"], key=f"file_seg_{cnt_s}")
+        observaciones_capturista = st.text_area("Observaciones (Opcional)", key=f"obs_seg_{cnt_s}")
 
         if st.form_submit_button("📤 Guardar Seguimiento de Predio", type="primary"):
             if not es_oficinas_centrales and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
@@ -351,13 +357,13 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 
                 if ok:
                     st.cache_data.clear()
+                    st.session_state["reset_count_seg"] += 1
                     st.success(f"✅ {msg}")
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
-
 # -----------------------------------------------------------------------------
-# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS (Estructura Lineal y PDF Obligatorio)
+# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -367,9 +373,16 @@ elif menu == "📝 Registro Completo de Oficios":
 
     modo_accion = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True)
 
-    if st.session_state.get("last_modo") != modo_accion:
-        st.session_state["last_modo"] = modo_accion
+    # Contador para forzar la limpieza completa de los selectbox
+    if "reset_count_oficios" not in st.session_state:
+        st.session_state["reset_count_oficios"] = 0
+
+    if st.session_state.get("last_modo_oficios") != modo_accion:
+        st.session_state["last_modo_oficios"] = modo_accion
+        st.session_state["reset_count_oficios"] += 1
         st.rerun()
+
+    cnt = st.session_state["reset_count_oficios"]
 
     oficio_sel = None
     if modo_accion in ["✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"]:
@@ -379,7 +392,7 @@ elif menu == "📝 Registro Completo de Oficios":
 
         df_oficios['display_name'] = "Folio: " + df_oficios['dgcat'].astype(str) + " | Oficio: " + df_oficios['no_oficio'].fillna('').astype(str) + " | Estado: " + df_oficios['estado'].fillna('').astype(str)
 
-        texto_busqueda = st.text_input("🔎 Buscar por folio DGCAT, No. de oficio o Estado:")
+        texto_busqueda = st.text_input("🔎 Buscar por folio DGCAT, No. de oficio o Estado:", key=f"busq_of_{cnt}")
         df_busqueda = df_oficios
         if texto_busqueda.strip():
             patron = texto_busqueda.strip().upper()
@@ -393,44 +406,23 @@ elif menu == "📝 Registro Completo de Oficios":
                 st.stop()
 
         opciones_oficios = df_busqueda['display_name'].tolist()
-        seleccion = st.selectbox("🔍 Seleccione el Oficio:", opciones_oficios)
+        seleccion = st.selectbox("🔍 Seleccione el Oficio:", opciones_oficios, key=f"sel_of_{cnt}")
         idx_match = df_busqueda[df_busqueda['display_name'] == seleccion].index[0]
         oficio_sel = df_busqueda.loc[idx_match]
 
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
-        st.error(f"⚠️ Eliminar oficio **{oficio_sel['dgcat']}**.")
+        st.error(f"⚠️️ Eliminar oficio **{oficio_sel['dgcat']}**.")
         confirmar = st.checkbox("Confirmo que deseo eliminar este registro de forma DEFINITIVA.")
         if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary", disabled=not confirmar):
             ok, msg = eliminar_oficio(int(oficio_sel['id']), usuario_actual=st.session_state['username'])
             if ok:
                 st.cache_data.clear()
+                st.session_state["reset_count_oficios"] += 1
                 st.success(f"✅ {msg}")
                 st.rerun()
             else:
                 st.error(f"❌ {msg}")
         st.stop()
-
-    es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
-    estados_list = get_estados()
-
-    if es_oficinas_centrales_admin:
-        estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
-        st.text_input("1. Estado", value="OFICINAS CENTRALES", disabled=True)
-        st.text_input("2. Municipio", value="OFICINAS CENTRALES", disabled=True)
-        st.text_input("3. Ejido", value="OFICINAS CENTRALES", disabled=True)
-    else:
-        def_estado_idx = estados_list.index(oficio_sel['estado']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['estado'] in estados_list) else 0
-        estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, index=def_estado_idx)
-
-        muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
-        def_mun_idx = muns_list.index(oficio_sel['municipio']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['municipio'] in muns_list) else 0
-        municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, index=def_mun_idx)
-
-        ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
-        def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
-        ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx)
-
-    st.markdown("---")
 
     scg_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
@@ -453,25 +445,47 @@ elif menu == "📝 Registro Completo de Oficios":
         init_no_oficio = ""
         init_obs = ""
 
-    # Captura en Columna Única Lineal para garantizar actualización limpia
+    # Todo el formulario encapsulado dentro de st.form
     with st.form("form_oficio_admin", clear_on_submit=True):
-        dgcat_folio = st.text_input("Folio DGCAT *", value=init_dgcat)
+        es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
+        estados_list = get_estados()
+
+        if es_oficinas_centrales_admin:
+            estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
+            st.text_input("1. Estado", value="OFICINAS CENTRALES", disabled=True)
+            st.text_input("2. Municipio", value="OFICINAS CENTRALES", disabled=True)
+            st.text_input("3. Ejido", value="OFICINAS CENTRALES", disabled=True)
+        else:
+            def_estado_idx = estados_list.index(oficio_sel['estado']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['estado'] in estados_list) else 0
+            estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, index=def_estado_idx, key=f"edo_of_{cnt}")
+
+            muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
+            def_mun_idx = muns_list.index(oficio_sel['municipio']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['municipio'] in muns_list) else 0
+            municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, index=def_mun_idx, key=f"mun_of_{cnt}")
+
+            ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
+            def_ejido_idx = ejidos_list.index(oficio_sel['ejido']) + 1 if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else 0
+            ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx, key=f"eji_of_{cnt}")
+
+        st.markdown("---")
+
+        dgcat_folio = st.text_input("Folio DGCAT *", value=init_dgcat, key=f"dgcat_of_{cnt}")
 
         idx_scg = scg_options.index(oficio_sel['scg']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
         idx_siscat = siscat_options.index(oficio_sel['siscat']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['siscat'] in siscat_options) else 0
         idx_sistemas_or = sistemas_or_options.index(oficio_sel['sistemas_or']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and 'sistemas_or' in oficio_sel and oficio_sel['sistemas_or'] in sistemas_or_options) else 0
         idx_tramite = tramite_options.index(oficio_sel['tipo_tramite']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['tipo_tramite'] in tramite_options) else 0
 
-        id_num = st.text_input("ID Numérico", value=init_id_reg)
-        no_oficio = st.text_input("NO. OFICIO", value=init_no_oficio)
-        f_entrega = st.date_input("FECHA DE ENTREGA", value=date.today(), format="DD/MM/YYYY")
-        f_recibido = st.date_input("FECHA DE RECIBIDO", value=date.today(), format="DD/MM/YYYY")
-        scg_sel = st.selectbox("Bandeja SCG *", scg_options, index=idx_scg)
-        siscat_sel = st.selectbox("Estatus SISCAT *", siscat_options, index=idx_siscat)
-        sistemas_or_sel = st.selectbox("SISTEMAS/OR *", sistemas_or_options, index=idx_sistemas_or)
-        tipo_tramite = st.selectbox("TIPO DE TRÁMITE *", tramite_options, index=idx_tramite)
-        observaciones = st.text_area("OBSERVACIONES", value=init_obs)
-        archivo_nuevo = st.file_uploader("Subir/Reemplazar PDF Escaneado * [RESTRICCIÓN OBLIGATORIA]", type=["pdf"])
+        id_num = st.text_input("ID Numérico", value=init_id_reg, key=f"idreg_of_{cnt}")
+        no_oficio = st.text_input("NO. OFICIO", value=init_no_oficio, key=f"proof_of_{cnt}")
+        f_entrega = st.date_input("FECHA DE ENTREGA", value=date.today(), format="DD/MM/YYYY", key=f"fent_of_{cnt}")
+        f_recibido = st.date_input("FECHA DE RECIBIDO", value=date.today(), format="DD/MM/YYYY", key=f"frec_of_{cnt}")
+        scg_sel = st.selectbox("Bandeja SCG *", scg_options, index=idx_scg, key=f"scg_of_{cnt}")
+        siscat_sel = st.selectbox("Estatus SISCAT *", siscat_options, index=idx_siscat, key=f"sis_of_{cnt}")
+        sistemas_or_sel = st.selectbox("SISTEMAS/OR *", sistemas_or_options, index=idx_sistemas_or, key=f"sisor_of_{cnt}")
+        tipo_tramite = st.selectbox("TIPO DE TRÁMITE *", tramite_options, index=idx_tramite, key=f"tram_of_{cnt}")
+        observaciones = st.text_area("OBSERVACIONES", value=init_obs, key=f"obs_of_{cnt}")
+        archivo_nuevo = st.file_uploader("Subir/Reemplazar PDF Escaneado * [RESTRICCIÓN OBLIGATORIA]", type=["pdf"], key=f"file_of_{cnt}")
 
         btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
@@ -516,6 +530,7 @@ elif menu == "📝 Registro Completo de Oficios":
 
                 if ok:
                     st.cache_data.clear()
+                    st.session_state["reset_count_oficios"] += 1
                     st.success(f"✅ {msg}")
                     st.rerun()
                 else:
