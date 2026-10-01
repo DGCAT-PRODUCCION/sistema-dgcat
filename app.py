@@ -281,45 +281,82 @@ if menu == "📈 Dashboard Ejecutivo":
         st.plotly_chart(fig_obs, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
+# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO (Reseteo Dinámico Completo)
 # -----------------------------------------------------------------------------
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
     st.caption("Todos los campos marcados con (*) y el Expediente PDF son ESTRICTAMENTE OBLIGATORIOS.")
 
+    # Contador dinámico para forzar re-renderizado completamente limpio
     if "reset_count_seg" not in st.session_state:
         st.session_state["reset_count_seg"] = 0
 
     cnt_s = st.session_state["reset_count_seg"]
 
+    # Inicializar estado de ubicaciones para el contador actual
+    if f"key_seg_estado_{cnt_s}" not in st.session_state:
+        st.session_state[f"key_seg_estado_{cnt_s}"] = "-- Seleccione --"
+    if f"key_seg_municipio_{cnt_s}" not in st.session_state:
+        st.session_state[f"key_seg_municipio_{cnt_s}"] = "-- Seleccione --"
+    if f"key_seg_ejido_{cnt_s}" not in st.session_state:
+        st.session_state[f"key_seg_ejido_{cnt_s}"] = "-- Seleccione --"
+
     estados_list = get_estados()
 
+    # --- SECCIÓN DE UBICACIÓN FUERA DEL FORM (REACTIVA) CON LLAVES DINÁMICAS ---
+    es_oficinas_centrales = st.checkbox(
+        "🏢 Trámite Perteneciente a OFICINAS CENTRALES", 
+        key=f"chk_seg_centrales_{cnt_s}"
+    )
+
+    if es_oficinas_centrales:
+        estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
+        st.text_input("1. Estado *", value="OFICINAS CENTRALES", disabled=True, key=f"dis_seg_edo_{cnt_s}")
+        st.text_input("2. Municipio *", value="OFICINAS CENTRALES", disabled=True, key=f"dis_seg_mun_{cnt_s}")
+        st.text_input("3. Ejido *", value="OFICINAS CENTRALES", disabled=True, key=f"dis_seg_eji_{cnt_s}")
+    else:
+        # 1. Estado
+        curr_edo_s = st.session_state.get(f"key_seg_estado_{cnt_s}", "-- Seleccione --")
+        idx_edo_s = estados_list.index(curr_edo_s) + 1 if curr_edo_s in estados_list else 0
+        estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, index=idx_edo_s, key=f"edo_seg_input_{cnt_s}")
+        if estado_sel != curr_edo_s:
+            st.session_state[f"key_seg_estado_{cnt_s}"] = estado_sel
+            st.session_state[f"key_seg_municipio_{cnt_s}"] = "-- Seleccione --"
+            st.session_state[f"key_seg_ejido_{cnt_s}"] = "-- Seleccione --"
+            st.rerun()
+
+        # 2. Municipio
+        muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
+        curr_mun_s = st.session_state.get(f"key_seg_municipio_{cnt_s}", "-- Seleccione --")
+        idx_mun_s = muns_list.index(curr_mun_s) + 1 if curr_mun_s in muns_list else 0
+        municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, index=idx_mun_s, key=f"mun_seg_input_{cnt_s}")
+        if municipio_sel != curr_mun_s:
+            st.session_state[f"key_seg_municipio_{cnt_s}"] = municipio_sel
+            st.session_state[f"key_seg_ejido_{cnt_s}"] = "-- Seleccione --"
+            st.rerun()
+
+        # 3. Ejido
+        ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
+        curr_eji_s = st.session_state.get(f"key_seg_ejido_{cnt_s}", "-- Seleccione --")
+        idx_eji_s = ejidos_list.index(curr_eji_s) + 1 if curr_eji_s in ejidos_list else 0
+        ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=idx_eji_s, key=f"eji_seg_input_{cnt_s}")
+        if ejido_sel != curr_eji_s:
+            st.session_state[f"key_seg_ejido_{cnt_s}"] = ejido_sel
+            st.rerun()
+
+    st.markdown("---")
+
+    # FORMULARIO DE CAPTURA DE SEGUIMIENTO
     with st.form("form_seguimiento_predio", clear_on_submit=True):
-        es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_seg_{cnt_s}")
-
-        if es_oficinas_centrales:
-            estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
-            st.text_input("1. Estado *", value="OFICINAS CENTRALES", disabled=True)
-            st.text_input("2. Municipio *", value="OFICINAS CENTRALES", disabled=True)
-            st.text_input("3. Ejido *", value="OFICINAS CENTRALES", disabled=True)
-        else:
-            estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, key=f"edo_seg_{cnt_s}")
-            muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
-            municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, key=f"mun_seg_{cnt_s}")
-            ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
-            ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, key=f"eji_seg_{cnt_s}")
-
-        st.markdown("---")
-
-        dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/", key=f"key_seg_dgcat_{cnt_s}")
+        dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/", key=f"f_seg_dgcat_{cnt_s}")
         dgcat_check = dgcat_folio.strip().upper()
         
         id_existente = existe_folio_seguimiento(dgcat_check) if dgcat_check and dgcat_check != "DGCAT/100/" else None
         if id_existente:
             st.info(f"ℹ️ Este folio ya existe (ID Interno #{id_existente}). Al guardar se ACTUALIZARÁ ese registro.")
 
-        archivo_escaneado = st.file_uploader("Adjuntar Expediente Escaneado (PDF) * [RESTRICCIÓN OBLIGATORIA]", type=["pdf"], key=f"file_seg_{cnt_s}")
-        observaciones_capturista = st.text_area("Observaciones (Opcional)", key=f"obs_seg_{cnt_s}")
+        archivo_escaneado = st.file_uploader("Adjuntar Expediente Escaneado (PDF) * [RESTRICCIÓN OBLIGATORIA]", type=["pdf"], key=f"f_seg_file_{cnt_s}")
+        observaciones_capturista = st.text_area("Observaciones (Opcional)", key=f"f_seg_obs_{cnt_s}")
 
         if st.form_submit_button("📤 Guardar Seguimiento de Predio", type="primary"):
             if not es_oficinas_centrales and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
@@ -357,6 +394,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 
                 if ok:
                     st.cache_data.clear()
+                    # Incrementar el contador de seguimiento para forzar el borrado completo de componentes visibles
                     st.session_state["reset_count_seg"] += 1
                     st.success(f"✅ {msg}")
                     st.rerun()
