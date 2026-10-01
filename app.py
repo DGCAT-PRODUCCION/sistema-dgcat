@@ -72,6 +72,91 @@ if "rol" not in st.session_state:
     st.session_state["rol"] = "operador"
 
 engine = get_engine()
+# PANEL INTERNO
+st.markdown(f"""
+<div class="session-badge">
+    <span>🟢 SESIÓN ACTIVA | <strong>{st.session_state['nombre']}</strong> ({st.session_state['username']})</span>
+    <span>PERFIL: <strong>{st.session_state['rol'].upper()}</strong></span>
+</div>
+""", unsafe_allow_html=True)
+
+if os.path.exists("logo_ran.png"):
+    st.sidebar.image("logo_ran.png", use_container_width=True)
+
+st.sidebar.title(f"👤 {st.session_state['nombre']}")
+st.sidebar.caption(f"ROL: {st.session_state['rol'].upper()}")
+
+if st.sidebar.button("🔒 Cerrar Sesión"):
+    st.session_state["authenticated"] = False
+    st.session_state["username"] = ""
+    st.session_state["nombre"] = ""
+    st.session_state["rol"] = "operador"
+    st.rerun()
+
+st.sidebar.markdown("---")
+engine = get_engine()
+
+# CONTROL DE ROL EN FRONTEND
+if st.session_state["rol"] == "operador":
+    menu_options = ["📍 Seguimiento de Ubicación de Predio"]
+elif st.session_state["rol"] == "supervisor":
+    menu_options = [
+        "📈 Dashboard Ejecutivo", 
+        "📝 Registro Completo de Oficios", 
+        "📍 Seguimiento de Ubicación de Predio", 
+        "🔍 Consulta y Expedientes", 
+        "🗂️ Consulta de Seguimiento de Predio",
+        "⚙️ Gestión de Catálogos"
+    ]
+else:  # admin
+    menu_options = [
+        "📈 Dashboard Ejecutivo", 
+        "📝 Registro Completo de Oficios", 
+        "📍 Seguimiento de Ubicación de Predio", 
+        "🔍 Consulta y Expedientes", 
+        "🗂️ Consulta de Seguimiento de Predio",
+        "⚙️ Gestión de Catálogos",
+        "👥 Alta de Usuarios"
+    ]
+
+menu = st.sidebar.radio("Menú de Opciones", menu_options)
+
+# -----------------------------------------------------------------------------
+# FUNCIONES AUXILIARES DE UBICACIÓN
+# -----------------------------------------------------------------------------
+@st.cache_data(ttl=600)
+def get_cat_ubicaciones_df():
+    try:
+        df = pd.read_sql("SELECT * FROM cat_ubicaciones", engine)
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        
+        col_edo = [c for c in df.columns if 'estado' in c or 'edo' in c][0] if any('estado' in c or 'edo' in c for c in df.columns) else df.columns[0]
+        col_mun = [c for c in df.columns if 'muni' in c][0] if any('muni' in c for c in df.columns) else df.columns[1]
+        col_eji = [c for c in df.columns if 'nucleo' in c or 'ejido' in c or 'nuc' in c][0] if any('nucleo' in c or 'ejido' in c or 'nuc' in c for c in df.columns) else df.columns[2]
+        
+        return pd.DataFrame({
+            'estado': df[col_edo].astype(str).str.strip().str.upper(),
+            'municipio': df[col_mun].astype(str).str.strip().str.upper(),
+            'ejido': df[col_eji].astype(str).str.strip().str.upper()
+        })
+    except Exception:
+        return pd.DataFrame(columns=['estado', 'municipio', 'ejido'])
+
+def get_estados():
+    df = get_cat_ubicaciones_df()
+    return [] if df.empty else sorted(list(df['estado'].dropna().unique()))
+
+def get_municipios(estado):
+    df = get_cat_ubicaciones_df()
+    if df.empty: return []
+    filtered = df[df['estado'].str.upper() == str(estado).strip().upper()]
+    return sorted(list(filtered['municipio'].dropna().unique()))
+
+def get_ejidos(estado, municipio):
+    df = get_cat_ubicaciones_df()
+    if df.empty: return []
+    filtered = df[(df['estado'].str.upper() == str(estado).strip().upper()) & (df['municipio'].str.upper() == str(municipio).strip().upper())]
+    return sorted(list(filtered['ejido'].dropna().unique()))
 # -----------------------------------------------------------------------------
 # FUNCIONES AUXILIARES DE UBICACIÓN ULTRA-RÁPIDAS (MENOS DE 1 SEGUNDO)
 # -----------------------------------------------------------------------------
