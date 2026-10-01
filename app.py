@@ -294,7 +294,7 @@ if menu == "📈 Dashboard Ejecutivo":
         st.plotly_chart(fig_obs, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
+# 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO (Reactivo + Sin Parpadeos)
 # -----------------------------------------------------------------------------
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
@@ -304,25 +304,56 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
         st.session_state["reset_count_seg"] = 0
 
     cnt_s = st.session_state["reset_count_seg"]
+
+    if f"sel_seg_estado_{cnt_s}" not in st.session_state:
+        st.session_state[f"sel_seg_estado_{cnt_s}"] = "-- Seleccione --"
+    if f"sel_seg_municipio_{cnt_s}" not in st.session_state:
+        st.session_state[f"sel_seg_municipio_{cnt_s}"] = "-- Seleccione --"
+    if f"sel_seg_ejido_{cnt_s}" not in st.session_state:
+        st.session_state[f"sel_seg_ejido_{cnt_s}"] = "-- Seleccione --"
+
     estados_list = get_estados()
 
+    es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_seg_c_{cnt_s}")
+
+    if es_oficinas_centrales:
+        estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
+        st.text_input("1. Estado *", value="OFICINAS CENTRALES", disabled=True, key=f"d_seg_e_{cnt_s}")
+        st.text_input("2. Municipio *", value="OFICINAS CENTRALES", disabled=True, key=f"d_seg_m_{cnt_s}")
+        st.text_input("3. Ejido *", value="OFICINAS CENTRALES", disabled=True, key=f"d_seg_ej_{cnt_s}")
+    else:
+        # Estado
+        curr_se = st.session_state.get(f"sel_seg_estado_{cnt_s}", "-- Seleccione --")
+        idx_se = estados_list.index(curr_se) + 1 if curr_se in estados_list else 0
+        estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, index=idx_se, key=f"inp_seg_e_{cnt_s}")
+        if estado_sel != curr_se:
+            st.session_state[f"sel_seg_estado_{cnt_s}"] = estado_sel
+            st.session_state[f"sel_seg_municipio_{cnt_s}"] = "-- Seleccione --"
+            st.session_state[f"sel_seg_ejido_{cnt_s}"] = "-- Seleccione --"
+            st.rerun()
+
+        # Municipio
+        muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
+        curr_sm = st.session_state.get(f"sel_seg_municipio_{cnt_s}", "-- Seleccione --")
+        idx_sm = muns_list.index(curr_sm) + 1 if curr_sm in muns_list else 0
+        municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, index=idx_sm, key=f"inp_seg_m_{cnt_s}")
+        if municipio_sel != curr_sm:
+            st.session_state[f"sel_seg_municipio_{cnt_s}"] = municipio_sel
+            st.session_state[f"sel_seg_ejido_{cnt_s}"] = "-- Seleccione --"
+            st.rerun()
+
+        # Ejido
+        ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
+        curr_sej = st.session_state.get(f"sel_seg_ejido_{cnt_s}", "-- Seleccione --")
+        idx_sej = ejidos_list.index(curr_sej) + 1 if curr_sej in ejidos_list else 0
+        ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=idx_sej, key=f"inp_seg_ej_{cnt_s}")
+        if ejido_sel != curr_sej:
+            st.session_state[f"sel_seg_ejido_{cnt_s}"] = ejido_sel
+            st.rerun()
+
+    st.markdown("---")
+
     with st.form(key=f"form_seguimiento_predio_{cnt_s}", clear_on_submit=True):
-        es_oficinas_centrales = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
-
-        if es_oficinas_centrales:
-            estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
-            st.text_input("1. Estado *", value="OFICINAS CENTRALES", disabled=True)
-            st.text_input("2. Municipio *", value="OFICINAS CENTRALES", disabled=True)
-            st.text_input("3. Ejido *", value="OFICINAS CENTRALES", disabled=True)
-        else:
-            estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list)
-            muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
-            municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list)
-            ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
-            ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list)
-
-        st.markdown("---")
-
         dgcat_folio = st.text_input("Folio DGCAT *", value="DGCAT/100/")
         dgcat_check = dgcat_folio.strip().upper()
         
@@ -335,7 +366,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 
         if st.form_submit_button("📤 Guardar Seguimiento de Predio", type="primary"):
             if not es_oficinas_centrales and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
-                st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido.")
+                st.error("⚠️️ Debe seleccionar Estado, Municipio y Ejido.")
             elif not dgcat_folio or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
             elif archivo_escaneado is None and not id_existente:
@@ -374,9 +405,8 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
-
 # -----------------------------------------------------------------------------
-# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS
+# 3. REGISTRO Y EDICIÓN AVANZADA DE OFICIOS (Reactivo + Sin Parpadeos)
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -389,6 +419,14 @@ elif menu == "📝 Registro Completo de Oficios":
         st.session_state["reset_count_oficios"] = 0
 
     cnt = st.session_state["reset_count_oficios"]
+
+    # Inicialización de estado de ubicación reactiva
+    if f"sel_estado_{cnt}" not in st.session_state:
+        st.session_state[f"sel_estado_{cnt}"] = "-- Seleccione --"
+    if f"sel_municipio_{cnt}" not in st.session_state:
+        st.session_state[f"sel_municipio_{cnt}"] = "-- Seleccione --"
+    if f"sel_ejido_{cnt}" not in st.session_state:
+        st.session_state[f"sel_ejido_{cnt}"] = "-- Seleccione --"
 
     oficio_sel = None
     if modo_accion in ["✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"]:
@@ -416,6 +454,14 @@ elif menu == "📝 Registro Completo de Oficios":
         idx_match = df_busqueda[df_busqueda['display_name'] == seleccion].index[0]
         oficio_sel = df_busqueda.loc[idx_match]
 
+        if oficio_sel is not None:
+            if f"loaded_of_{cnt}" not in st.session_state or st.session_state[f"loaded_of_{cnt}"] != oficio_sel['id']:
+                st.session_state[f"loaded_of_{cnt}"] = oficio_sel['id']
+                st.session_state[f"sel_estado_{cnt}"] = oficio_sel['estado'] if pd.notna(oficio_sel['estado']) else "-- Seleccione --"
+                st.session_state[f"sel_municipio_{cnt}"] = oficio_sel['municipio'] if pd.notna(oficio_sel['municipio']) else "-- Seleccione --"
+                st.session_state[f"sel_ejido_{cnt}"] = oficio_sel['ejido'] if pd.notna(oficio_sel['ejido']) else "-- Seleccione --"
+                st.rerun()
+
     if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
         st.error(f"⚠️ Eliminar oficio **{oficio_sel['dgcat']}**.")
         confirmar = st.checkbox("Confirmo que deseo eliminar este registro de forma DEFINITIVA.")
@@ -430,6 +476,48 @@ elif menu == "📝 Registro Completo de Oficios":
                 st.error(f"❌ {msg}")
         st.stop()
 
+    # --- SECCIÓN DE UBICACIÓN REACTIVA EN TIEMPO REAL (FUERA DEL FORM) ---
+    es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES", key=f"chk_cent_{cnt}")
+
+    estados_list = get_estados()
+
+    if es_oficinas_centrales_admin:
+        estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
+        st.text_input("1. Estado", value="OFICINAS CENTRALES", disabled=True, key=f"dis_e_{cnt}")
+        st.text_input("2. Municipio", value="OFICINAS CENTRALES", disabled=True, key=f"dis_m_{cnt}")
+        st.text_input("3. Ejido", value="OFICINAS CENTRALES", disabled=True, key=f"dis_ej_{cnt}")
+    else:
+        # Callback para Estado
+        curr_e = st.session_state.get(f"sel_estado_{cnt}", "-- Seleccione --")
+        idx_e = estados_list.index(curr_e) + 1 if curr_e in estados_list else 0
+        estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, index=idx_e, key=f"inp_edo_{cnt}")
+        if estado_sel != curr_e:
+            st.session_state[f"sel_estado_{cnt}"] = estado_sel
+            st.session_state[f"sel_municipio_{cnt}"] = "-- Seleccione --"
+            st.session_state[f"sel_ejido_{cnt}"] = "-- Seleccione --"
+            st.rerun()
+
+        # Callback para Municipio
+        muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
+        curr_m = st.session_state.get(f"sel_municipio_{cnt}", "-- Seleccione --")
+        idx_m = muns_list.index(curr_m) + 1 if curr_m in muns_list else 0
+        municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, index=idx_m, key=f"inp_mun_{cnt}")
+        if municipio_sel != curr_m:
+            st.session_state[f"sel_municipio_{cnt}"] = municipio_sel
+            st.session_state[f"sel_ejido_{cnt}"] = "-- Seleccione --"
+            st.rerun()
+
+        # Callback para Ejido
+        ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
+        curr_ej = st.session_state.get(f"sel_ejido_{cnt}", "-- Seleccione --")
+        idx_ej = ejidos_list.index(curr_ej) + 1 if curr_ej in ejidos_list else 0
+        ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=idx_ej, key=f"inp_eji_{cnt}")
+        if ejido_sel != curr_ej:
+            st.session_state[f"sel_ejido_{cnt}"] = ejido_sel
+            st.rerun()
+
+    st.markdown("---")
+
     scg_options = ["-- Seleccione --"] + cargar_catalogo_cached("cat_scg")
     siscat_options = ["-- Seleccione --"] + cargar_catalogo_cached("cat_siscat")
     
@@ -439,7 +527,6 @@ elif menu == "📝 Registro Completo de Oficios":
         sistemas_or_options = ["-- Seleccione --", "SISTEMAS", "OR"]
 
     tramite_options = ["-- Seleccione --"] + cargar_catalogo_cached("cat_tramite")
-    estados_list = get_estados()
 
     if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
         init_dgcat = str(oficio_sel['dgcat']) if pd.notna(oficio_sel['dgcat']) else "DGCAT/100/"
@@ -452,31 +539,8 @@ elif menu == "📝 Registro Completo de Oficios":
         init_no_oficio = ""
         init_obs = ""
 
+    # FORMULARIO DE CAPTURA DE DATOS DEL OFICIO
     with st.form(key=f"form_oficio_admin_{cnt}", clear_on_submit=True):
-        es_oficinas_centrales_admin = st.checkbox("🏢 Trámite Perteneciente a OFICINAS CENTRALES")
-
-        if es_oficinas_centrales_admin:
-            estado_sel, municipio_sel, ejido_sel = "OFICINAS CENTRALES", "OFICINAS CENTRALES", "OFICINAS CENTRALES"
-            st.text_input("1. Estado", value="OFICINAS CENTRALES", disabled=True)
-            st.text_input("2. Municipio", value="OFICINAS CENTRALES", disabled=True)
-            st.text_input("3. Ejido", value="OFICINAS CENTRALES", disabled=True)
-        else:
-            def_edo = oficio_sel['estado'] if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['estado'] in estados_list) else "-- Seleccione --"
-            idx_edo = (estados_list.index(def_edo) + 1) if def_edo in estados_list else 0
-            estado_sel = st.selectbox("1. Estado *", ["-- Seleccione --"] + estados_list, index=idx_edo)
-
-            muns_list = get_municipios(estado_sel) if estado_sel != "-- Seleccione --" else []
-            def_mun = oficio_sel['municipio'] if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['municipio'] in muns_list) else "-- Seleccione --"
-            idx_mun = (muns_list.index(def_mun) + 1) if def_mun in muns_list else 0
-            municipio_sel = st.selectbox("2. Municipio *", ["-- Seleccione --"] + muns_list, index=idx_mun)
-
-            ejidos_list = get_ejidos(estado_sel, municipio_sel) if estado_sel != "-- Seleccione --" and municipio_sel != "-- Seleccione --" else []
-            def_eji = oficio_sel['ejido'] if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['ejido'] in ejidos_list) else "-- Seleccione --"
-            idx_eji = (ejidos_list.index(def_eji) + 1) if def_eji in ejidos_list else 0
-            ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=idx_eji)
-
-        st.markdown("---")
-
         dgcat_folio = st.text_input("Folio DGCAT *", value=init_dgcat)
 
         idx_scg = scg_options.index(oficio_sel['scg']) if (modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None and oficio_sel['scg'] in scg_options) else 0
