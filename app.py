@@ -72,136 +72,48 @@ if "rol" not in st.session_state:
     st.session_state["rol"] = "operador"
 
 engine = get_engine()
-
 # -----------------------------------------------------------------------------
-# FUNCIONES CON CACHÉ DE ALTO RENDIMIENTO (EVITAN LA PANTALLA DE CARGA)
+# FUNCIONES AUXILIARES DE UBICACIÓN ULTRA-RÁPIDAS (MENOS DE 1 SEGUNDO)
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=300)
-def cargar_oficios_cached():
-    df = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
-    df.columns = [c.lower() for c in df.columns]
-    return df
-
-@st.cache_data(ttl=300)
-def cargar_catalogo_cached(tabla):
+@st.cache_data(ttl=3600)
+def get_estados():
+    """Obtiene la lista de estados de forma instantánea"""
     try:
-        return pd.read_sql(f"SELECT nombre FROM {tabla} ORDER BY nombre", engine)['nombre'].tolist()
+        with engine.connect() as conn:
+            res = conn.execute(text("SELECT DISTINCT estado FROM cat_ubicaciones WHERE estado IS NOT NULL ORDER BY estado"))
+            return [r[0].strip().upper() for r in res if r[0]]
     except Exception:
         return []
 
-@st.cache_data(ttl=600)
-def get_cat_ubicaciones_df():
-    try:
-        df = pd.read_sql("SELECT * FROM cat_ubicaciones", engine)
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        
-        col_edo = [c for c in df.columns if 'estado' in c or 'edo' in c][0] if any('estado' in c or 'edo' in c for c in df.columns) else df.columns[0]
-        col_mun = [c for c in df.columns if 'muni' in c][0] if any('muni' in c for c in df.columns) else df.columns[1]
-        col_eji = [c for c in df.columns if 'nucleo' in c or 'ejido' in c or 'nuc' in c][0] if any('nucleo' in c or 'ejido' in c or 'nuc' in c for c in df.columns) else df.columns[2]
-        
-        return pd.DataFrame({
-            'estado': df[col_edo].astype(str).str.strip().str.upper(),
-            'municipio': df[col_mun].astype(str).str.strip().str.upper(),
-            'ejido': df[col_eji].astype(str).str.strip().str.upper()
-        })
-    except Exception:
-        return pd.DataFrame(columns=['estado', 'municipio', 'ejido'])
-
-def get_estados():
-    df = get_cat_ubicaciones_df()
-    return [] if df.empty else sorted(list(df['estado'].dropna().unique()))
-
+@st.cache_data(ttl=3600)
 def get_municipios(estado):
-    df = get_cat_ubicaciones_df()
-    if df.empty: return []
-    filtered = df[df['estado'].str.upper() == str(estado).strip().upper()]
-    return sorted(list(filtered['municipio'].dropna().unique()))
+    """Obtiene los municipios del estado seleccionado en milisegundos"""
+    if not estado or estado == "-- Seleccione --" or estado == "OFICINAS CENTRALES":
+        return []
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(
+                text("SELECT DISTINCT municipio FROM cat_ubicaciones WHERE UPPER(TRIM(estado)) = :edo AND municipio IS NOT NULL ORDER BY municipio"),
+                {"edo": estado.strip().upper()}
+            )
+            return [r[0].strip().upper() for r in res if r[0]]
+    except Exception:
+        return []
 
+@st.cache_data(ttl=3600)
 def get_ejidos(estado, municipio):
-    df = get_cat_ubicaciones_df()
-    if df.empty: return []
-    filtered = df[(df['estado'].str.upper() == str(estado).strip().upper()) & (df['municipio'].str.upper() == str(municipio).strip().upper())]
-    return sorted(list(filtered['ejido'].dropna().unique()))
-
-# LOGIN
-if not st.session_state["authenticated"]:
-    st.markdown("""
-    <div class="header-box">
-        <div class="header-title">🏛️ DIRECCIÓN GENERAL DE CATASTRO</div>
-        <div class="header-subtitle">Sistema de Control de Entrada y Salida de Oficios de Respuesta</div>
-        <hr class="header-line">
-    </div>
-    """, unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([1, 1.8, 1])
-    with col2:
-        st.write("### 🔑 Acceso Institucional")
-        usuario_input = st.text_input("Usuario", key="input_usr")
-        password_input = st.text_input("Contraseña", type="password", key="input_pwd")
-        
-        if st.button("Ingresar al Sistema", use_container_width=True, type="primary"):
-            if not usuario_input or not password_input:
-                st.warning("Ingrese su usuario y contraseña.")
-            else:
-                user = verificar_login(usuario_input, password_input)
-                if user:
-                    st.session_state["authenticated"] = True
-                    st.session_state["username"] = user[0]
-                    st.session_state["nombre"] = user[1]
-                    st.session_state["rol"] = user[2]
-                    st.rerun()
-                else:
-                    st.error("Credenciales incorrectas. Verifique sus datos.")
-    st.stop()
-
-# PANEL INTERNO
-st.markdown(f"""
-<div class="session-badge">
-    <span>🟢 SESIÓN ACTIVA | <strong>{st.session_state['nombre']}</strong> ({st.session_state['username']})</span>
-    <span>PERFIL: <strong>{st.session_state['rol'].upper()}</strong></span>
-</div>
-""", unsafe_allow_html=True)
-
-if os.path.exists("logo_ran.png"):
-    st.sidebar.image("logo_ran.png", use_container_width=True)
-
-st.sidebar.title(f"👤 {st.session_state['nombre']}")
-st.sidebar.caption(f"ROL: {st.session_state['rol'].upper()}")
-
-if st.sidebar.button("🔒 Cerrar Sesión"):
-    st.session_state["authenticated"] = False
-    st.session_state["username"] = ""
-    st.session_state["nombre"] = ""
-    st.session_state["rol"] = "operador"
-    st.rerun()
-
-st.sidebar.markdown("---")
-
-# CONTROL DE ROL EN FRONTEND
-if st.session_state["rol"] == "operador":
-    menu_options = ["📍 Seguimiento de Ubicación de Predio"]
-elif st.session_state["rol"] == "supervisor":
-    menu_options = [
-        "📈 Dashboard Ejecutivo", 
-        "📝 Registro Completo de Oficios", 
-        "📍 Seguimiento de Ubicación de Predio", 
-        "🔍 Consulta y Expedientes", 
-        "🗂️ Consulta de Seguimiento de Predio",
-        "⚙️ Gestión de Catálogos"
-    ]
-else:  # admin
-    menu_options = [
-        "📈 Dashboard Ejecutivo", 
-        "📝 Registro Completo de Oficios", 
-        "📍 Seguimiento de Ubicación de Predio", 
-        "🔍 Consulta y Expedientes", 
-        "🗂️ Consulta de Seguimiento de Predio",
-        "⚙️ Gestión de Catálogos",
-        "👥 Alta de Usuarios"
-    ]
-
-menu = st.sidebar.radio("Menú de Opciones", menu_options)
-
+    """Obtiene los ejidos/núcleos agregados en milisegundos"""
+    if not estado or estado == "-- Seleccione --" or municipio == "-- Seleccione --":
+        return []
+    try:
+        with engine.connect() as conn:
+            res = conn.execute(
+                text("SELECT DISTINCT ejido FROM cat_ubicaciones WHERE UPPER(TRIM(estado)) = :edo AND UPPER(TRIM(municipio)) = :mun AND ejido IS NOT NULL ORDER BY ejido"),
+                {"edo": estado.strip().upper(), "mun": municipio.strip().upper()}
+            )
+            return [r[0].strip().upper() for r in res if r[0]]
+    except Exception:
+        return []
 # -----------------------------------------------------------------------------
 # 1. DASHBOARD EJECUTIVO
 # -----------------------------------------------------------------------------
