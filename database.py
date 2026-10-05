@@ -71,7 +71,7 @@ def parse_date_safe(val):
     return val_str
 
 # -----------------------------------------------------------------------------
-# INICIALIZACIÓN ESTRUCTURA DB
+# INICIALIZACIÓN ESTRUCTURA DB & MIGRACIONES AUTOMÁTICAS
 # -----------------------------------------------------------------------------
 def init_db():
     engine = get_engine()
@@ -79,6 +79,7 @@ def init_db():
 
     try:
         with engine.begin() as conn:
+            # 1. TABLA USUARIOS
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS usuarios (
@@ -115,23 +116,25 @@ def init_db():
                     "p": "admin123"
                 })
 
+            # 2. CATÁLOGOS
             conn.execute(text("CREATE TABLE IF NOT EXISTS cat_scg (nombre TEXT UNIQUE);"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS cat_siscat (nombre TEXT UNIQUE);"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS cat_sistemas_or (nombre TEXT UNIQUE);"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS cat_tramite (nombre TEXT UNIQUE);"))
 
             for item in ["BANDEJA DE GEOGRAFO", "CON RESPUESTA PREVIA", "CONCLUIDO", "EN ESPERA DE SISTEMAS", "EN OTRA BANDEJA", "GEOG. PATRICIA", "SISTEMAS", "SUBIDO"]:
-                conn.execute(text("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (:n)"), {"n": item.upper()})
+                conn.execute(text("INSERT OR IGNORE INTO cat_scg (nombre) VALUES (:n)") if is_sqlite else text("INSERT INTO cat_scg (nombre) VALUES (:n) ON CONFLICT (nombre) DO NOTHING"), {"n": item.upper()})
 
             for item in ["ACUSE", "CONCLUIDO", "CORREO", "SISTEMAS", "SUBIDO"]:
-                conn.execute(text("INSERT OR IGNORE INTO cat_siscat (nombre) VALUES (:n)"), {"n": item.upper()})
+                conn.execute(text("INSERT OR IGNORE INTO cat_siscat (nombre) VALUES (:n)") if is_sqlite else text("INSERT INTO cat_siscat (nombre) VALUES (:n) ON CONFLICT (nombre) DO NOTHING"), {"n": item.upper()})
 
             for item in ["SISTEMAS", "OR"]:
-                conn.execute(text("INSERT OR IGNORE INTO cat_sistemas_or (nombre) VALUES (:n)"), {"n": item.upper()})
+                conn.execute(text("INSERT OR IGNORE INTO cat_sistemas_or (nombre) VALUES (:n)") if is_sqlite else text("INSERT INTO cat_sistemas_or (nombre) VALUES (:n) ON CONFLICT (nombre) DO NOTHING"), {"n": item.upper()})
 
             for item in ["CAMBIO DE DESTINO", "CAMBIO DE SUPERFICIE", "DOMINIO PLENO", "ACT. DE MOSAICO", "SENTENCIA"]:
-                conn.execute(text("INSERT OR IGNORE INTO cat_tramite (nombre) VALUES (:n)"), {"n": item.upper()})
+                conn.execute(text("INSERT OR IGNORE INTO cat_tramite (nombre) VALUES (:n)") if is_sqlite else text("INSERT INTO cat_tramite (nombre) VALUES (:n) ON CONFLICT (nombre) DO NOTHING"), {"n": item.upper()})
 
+            # 3. TABLA OFICIOS
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS oficios (
@@ -149,13 +152,13 @@ def init_db():
                         sistemas_or TEXT,
                         tipo_tramite TEXT,
                         observaciones TEXT,
-                        archivo_escaneado TEXT
+                        archivo_escaneado TEXT,
+                        creado_por TEXT,
+                        fecha_creacion TEXT,
+                        actualizado_por TEXT,
+                        fecha_actualizacion TEXT
                     );
                 """))
-                try:
-                    conn.execute(text("ALTER TABLE oficios ADD COLUMN sistemas_or TEXT;"))
-                except Exception:
-                    pass
             else:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS oficios (
@@ -173,17 +176,15 @@ def init_db():
                         sistemas_or TEXT,
                         tipo_tramite TEXT,
                         observaciones TEXT,
-                        archivo_escaneado TEXT
+                        archivo_escaneado TEXT,
+                        creado_por TEXT,
+                        fecha_creacion TEXT,
+                        actualizado_por TEXT,
+                        fecha_actualizacion TEXT
                     );
                 """))
-                try:
-                    conn.execute(text("ALTER TABLE oficios ADD COLUMN sistemas_or TEXT;"))
-                except Exception:
-                    pass
 
-            # -----------------------------------------------------------------
-            # NUEVA BASE: SEGUIMIENTO DE UBICACIÓN DE PREDIO (independiente de oficios)
-            # -----------------------------------------------------------------
+            # 4. TABLA SEGUIMIENTO_PREDIO
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS seguimiento_predio (
@@ -196,7 +197,9 @@ def init_db():
                         fecha_actualizacion TEXT,
                         observaciones TEXT,
                         archivo_escaneado TEXT,
-                        registrado_por TEXT
+                        registrado_por TEXT,
+                        creado_por TEXT,
+                        actualizado_por TEXT
                     );
                 """))
             else:
@@ -211,15 +214,13 @@ def init_db():
                         fecha_actualizacion TEXT,
                         observaciones TEXT,
                         archivo_escaneado TEXT,
-                        registrado_por TEXT
+                        registrado_por TEXT,
+                        creado_por TEXT,
+                        actualizado_por TEXT
                     );
                 """))
 
-            # -----------------------------------------------------------------
-            # NUEVA BASE: ARCHIVOS ADJUNTOS (permite varios PDF por registro,
-            # tanto de 'oficios' como de 'seguimiento_predio', sin reemplazar
-            # el archivo principal).
-            # -----------------------------------------------------------------
+            # 5. TABLA ARCHIVOS_ADJUNTOS
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS archivos_adjuntos (
@@ -228,7 +229,8 @@ def init_db():
                         registro_id INTEGER,
                         nombre_archivo TEXT,
                         fecha_subida TEXT,
-                        subido_por TEXT
+                        subido_por TEXT,
+                        nombre_original TEXT
                     );
                 """))
             else:
@@ -239,15 +241,12 @@ def init_db():
                         registro_id INTEGER,
                         nombre_archivo TEXT,
                         fecha_subida TEXT,
-                        subido_por TEXT
+                        subido_por TEXT,
+                        nombre_original TEXT
                     );
                 """))
 
-            # -----------------------------------------------------------------
-            # AUDITORÍA: registra quién y cuándo creó, modificó o eliminó cada
-            # registro. Se guarda en una tabla APARTE (no en la fila misma)
-            # para que la historia sobreviva aunque el registro se elimine.
-            # -----------------------------------------------------------------
+            # 6. TABLA AUDITORIA
             if is_sqlite:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS auditoria (
@@ -273,43 +272,31 @@ def init_db():
                     );
                 """))
 
-            # Columnas de trazabilidad rápida directamente en 'oficios' y
-            # 'seguimiento_predio' (además del log completo en 'auditoria'),
-            # para poder mostrar "última modificación por/cuándo" sin tener
-            # que consultar el log cada vez.
-            for col_def in [
-                "creado_por TEXT", "fecha_creacion TEXT",
-                "actualizado_por TEXT", "fecha_actualizacion TEXT"
-            ]:
-                col_name = col_def.split()[0]
+            # -----------------------------------------------------------------
+            # MIGRACIÓN AUTOMÁTICA DE COLUMNAS PARA BASE DE DATOS EXISTENTES (POSTGRES / SQLITE)
+            # Soluciona automáticamente el error "UndefinedColumn" en Producción.
+            # -----------------------------------------------------------------
+            columnas_migracion = [
+                ("oficios", "sistemas_or", "TEXT"),
+                ("oficios", "creado_por", "TEXT"),
+                ("oficios", "fecha_creacion", "TEXT"),
+                ("oficios", "actualizado_por", "TEXT"),
+                ("oficios", "fecha_actualizacion", "TEXT"),
+                ("seguimiento_predio", "creado_por", "TEXT"),
+                ("seguimiento_predio", "actualizado_por", "TEXT"),
+                ("archivos_adjuntos", "nombre_original", "TEXT"),
+            ]
+
+            for tabla, columna, tipo in columnas_migracion:
                 try:
-                    conn.execute(text(f"ALTER TABLE oficios ADD COLUMN {col_def};"))
-                except Exception:
-                    pass
-            for col_def in ["creado_por TEXT", "actualizado_por TEXT"]:
-                try:
-                    conn.execute(text(f"ALTER TABLE seguimiento_predio ADD COLUMN {col_def};"))
+                    if is_sqlite:
+                        conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo};"))
+                    else:
+                        conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna} {tipo};"))
                 except Exception:
                     pass
 
-            # Nombre "amigable" del documento adicional (sin el prefijo
-            # ADJ_<id>_ que se usa solo para que el archivo sea único en
-            # disco). Los adjuntos guardados antes de esta columna existir
-            # simplemente muestran nombre_archivo tal cual (ver COALESCE al
-            # consultarlos en obtener_archivos_adjuntos).
-            try:
-                conn.execute(text("ALTER TABLE archivos_adjuntos ADD COLUMN nombre_original TEXT;"))
-            except Exception:
-                pass
-
-            # MIGRACIÓN RETROACTIVA: los adjuntos subidos ANTES de que
-            # existiera 'nombre_original' quedaron con ese campo en NULL, y
-            # mostraban al usuario el nombre físico en disco completo
-            # (ej. "ADJ_724_archivo.pdf"), exponiendo el ID interno. Aquí se
-            # reconstruye un nombre limpio quitando el prefijo "ADJ_<id>_"
-            # (el único patrón que esta app genera) y se guarda como
-            # nombre_original, para que el visor deje de mostrar ese ID en
-            # los documentos ya existentes sin tener que volver a subirlos.
+            # MIGRACIÓN RETROACTIVA PARA NOMBRES ORIGINALES DE ARCHIVOS
             try:
                 filas_sin_nombre = conn.execute(text(
                     "SELECT id, nombre_archivo FROM archivos_adjuntos WHERE nombre_original IS NULL OR nombre_original = ''"
@@ -387,8 +374,6 @@ def eliminar_usuario(username):
     return True, f"Usuario '{usr_clean}' eliminado."
 
 def modificar_usuario(username, nombre_completo, rol, nueva_password=None):
-    """Actualiza nombre y rol de un usuario existente. Si nueva_password no es
-    vacío, también actualiza la contraseña."""
     engine = get_engine()
     usr_clean = username.strip().lower()
     nombre_clean = nombre_completo.strip().upper()
@@ -398,7 +383,7 @@ def modificar_usuario(username, nombre_completo, rol, nueva_password=None):
                 pwd_hash = hash_password(nueva_password)
                 conn.execute(text("""
                     UPDATE usuarios SET nombre_completo = :n, rol = :r,
-                           password_hash = :h, password_plain = :p
+                               password_hash = :h, password_plain = :p
                     WHERE LOWER(username) = :u
                 """), {"n": nombre_clean, "r": rol, "h": pwd_hash, "p": nueva_password, "u": usr_clean})
             else:
@@ -411,12 +396,6 @@ def modificar_usuario(username, nombre_completo, rol, nueva_password=None):
         return False, f"Error al actualizar usuario: {e}"
 
 def obtener_pagina(tabla, columnas="*", filtro_sql="", params=None, order_by="id DESC", page=1, page_size=200):
-    """
-    Trae solo una 'página' de filas usando LIMIT/OFFSET en SQL, en vez de leer
-    toda la tabla y cortarla en memoria. filtro_sql debe venir como
-    "WHERE ..." (o vacío) usando placeholders :nombre, con sus valores en params.
-    Devuelve (df_pagina, total_filas).
-    """
     engine = get_engine()
     params = dict(params or {})
     offset = max(page - 1, 0) * page_size
@@ -433,9 +412,6 @@ def obtener_pagina(tabla, columnas="*", filtro_sql="", params=None, order_by="id
     return df, total
 
 def registrar_auditoria(tabla, registro_id, accion, usuario, detalle=""):
-    """Guarda una entrada de auditoría. No lanza excepción hacia afuera: un
-    fallo al auditar nunca debe impedir que la operación principal (guardar/
-    eliminar) se complete."""
     try:
         engine = get_engine()
         with engine.begin() as conn:
@@ -476,7 +452,6 @@ def eliminar_oficio(id_oficio, usuario=None):
     return True, f"Oficio ID #{id_oficio} eliminado."
 
 def existe_folio_oficio(dgcat, excluir_id=None):
-    """Busca si un folio DGCAT ya existe en la tabla oficios. Devuelve el id existente o None."""
     engine = get_engine()
     dgcat_upper = str(dgcat).strip().upper()
     with engine.connect() as conn:
@@ -493,17 +468,6 @@ def existe_folio_oficio(dgcat, excluir_id=None):
         return res[0] if res else None
 
 def guardar_oficio(datos, id_oficio=None, usuario=None):
-    """
-    Inserta o actualiza un registro en 'oficios'.
-    datos: dict con las llaves de columna -> valor.
-    id_oficio: si se provee, actualiza ese registro; si no, inserta uno nuevo.
-    usuario: quién realiza la acción, para dejarlo en 'auditoria' y en las
-    columnas creado_por/actualizado_por.
-    Devuelve (ok, mensaje). El commit ocurre dentro del 'with'; el rerun de
-    Streamlit se debe llamar DESPUÉS de que esta función retorne, nunca dentro
-    del bloque de transacción (st.rerun() lanza una excepción que provocaría
-    ROLLBACK si se ejecuta dentro de un 'with engine.begin()').
-    """
     engine = get_engine()
     ahora = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     datos = dict(datos)
@@ -542,7 +506,7 @@ def guardar_oficio(datos, id_oficio=None, usuario=None):
         return False, f"Error al guardar en la base de datos: {e}"
 
 # -----------------------------------------------------------------------------
-# SEGUIMIENTO DE UBICACIÓN DE PREDIO (base independiente de oficios)
+# SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
 def guardar_seguimiento_predio(datos, id_registro=None, usuario=None):
     engine = get_engine()
@@ -608,7 +572,7 @@ def existe_folio_seguimiento(dgcat, excluir_id=None):
         return res[0] if res else None
 
 # -----------------------------------------------------------------------------
-# ARCHIVOS ADJUNTOS (múltiples PDF por registro, sin reemplazar el principal)
+# ARCHIVOS ADJUNTOS
 # -----------------------------------------------------------------------------
 def agregar_archivo_adjunto(modulo, registro_id, nombre_archivo, subido_por, nombre_original=None):
     engine = get_engine()
@@ -634,10 +598,6 @@ def obtener_archivos_adjuntos(modulo, registro_id):
             WHERE modulo = :m AND registro_id = :rid ORDER BY id ASC
         """), {"m": modulo, "rid": int(registro_id)}).fetchall()
         return [
-            # nombre_para_mostrar: el nombre "limpio" que ve el usuario, sin
-            # el ID interno embebido. Para adjuntos guardados antes de esta
-            # mejora (nombre_original quedó NULL), se cae de regreso al
-            # nombre de archivo tal cual, para no romper lo ya existente.
             {"id": r[0], "nombre_archivo": r[1], "fecha_subida": r[2], "subido_por": r[3],
              "nombre_para_mostrar": r[4] if r[4] else r[1]}
             for r in res
@@ -652,9 +612,6 @@ def eliminar_archivo_adjunto(id_adjunto):
     except Exception as e:
         return False, f"Error al eliminar: {e}"
 
-# Relación entre cada tabla catálogo y la columna de 'oficios' que la usa,
-# para poder mantener sincronizados los registros ya capturados cuando se
-# renombra o elimina una opción del catálogo.
 CATALOGO_COLUMNA_OFICIOS = {
     "cat_scg": "scg",
     "cat_siscat": "siscat",
@@ -682,8 +639,6 @@ def actualizar_opcion_catalogo(tabla, nombre_antiguo, nombre_nuevo):
                 {"nuevo": nuevo_clean, "antiguo": antiguo_clean}
             )
 
-            # Propaga el cambio a los oficios que ya usaban el valor anterior,
-            # para que no queden registros con un valor de catálogo "huérfano".
             afectados = 0
             columna = CATALOGO_COLUMNA_OFICIOS.get(tabla)
             if columna:
@@ -714,8 +669,6 @@ def eliminar_opcion_catalogo(tabla, nombre_opcion):
         return False, f"Error al eliminar: {e}"
 
 def contar_oficios_con_valor_catalogo(tabla, nombre_opcion):
-    """Cuenta cuántos oficios ya capturados usan este valor de catálogo,
-    para advertir al usuario antes de eliminarlo."""
     columna = CATALOGO_COLUMNA_OFICIOS.get(tabla)
     if not columna:
         return 0
@@ -757,11 +710,9 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
     border_thin = Side(border_style="thin", color="D1D5DB")
     border_box = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
-    # TITULO DE RESUMEN EJECUTIVO
     ws_sum.cell(row=1, column=1, value="DIRECCIÓN GENERAL DE CATASTRO").font = font_title
     ws_sum.cell(row=2, column=1, value=f"REPORTE DE CONTROL DE GESTIÓN | FECHA: {datetime.now().strftime('%d/%m/%Y')}").font = font_sub
 
-    # ENCABEZADOS DE MÉTRICAS
     ws_sum.cell(row=4, column=1, value="Métrica Directiva").font = font_header
     ws_sum.cell(row=4, column=1).fill = fill_header
     ws_sum.cell(row=4, column=2, value="Valor").font = font_header
@@ -804,7 +755,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
         c1.alignment = Alignment(vertical="center")
         c2.alignment = Alignment(horizontal="center", vertical="center")
 
-    # GRÁFICA DE MÉTRICA DIRECTIVA (sustituye la antigua tabla "Bandeja SCG")
     chart_start_row = 16
     ws_sum.cell(row=chart_start_row, column=1, value="Métrica Directiva (Gráfica)").font = font_header
     ws_sum.cell(row=chart_start_row, column=1).fill = fill_header
@@ -840,13 +790,8 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
     chart_directiva.set_categories(cats_ref)
     chart_directiva.width = 18
     chart_directiva.height = 9
-    # La gráfica se ancla junto a la tabla de métricas principal (fila 4, la
-    # misma altura donde arranca "Métrica Directiva"), en vez de quedar
-    # varias filas más abajo de las dos tablas: así aparece centrada junto al
-    # contenido, sin mover ni un dato ni un cálculo, solo su posición visual.
     ws_sum.add_chart(chart_directiva, "D4")
 
-    # DETALLE GENERAL
     headers_completos = [
         "ID", "ID REGISTRO", "ESTADO", "MUNICIPIO", "EJIDO", 
         "NO. OFICIO", "DGCAT", "FECHA ENTREGA", "FECHA RECIBIDO", 
@@ -854,8 +799,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
     ]
     cols_df_completos = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
 
-    # El ID interno se sigue usando para ordenar el detalle (más antiguo a
-    # más reciente) aunque no se muestre como columna al usuario final.
     if mostrar_id:
         headers = headers_completos
         cols_df = cols_df_completos
@@ -863,8 +806,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
         headers = [h for h in headers_completos if h != "ID"]
         cols_df = [c for c in cols_df_completos if c != "id"]
 
-    # Columnas que se centran, identificadas por NOMBRE (no por posición fija)
-    # para que el resultado sea correcto tanto si el ID se muestra como si no.
     HEADERS_CENTRADOS = {"ID", "ID REGISTRO", "FECHA ENTREGA", "FECHA RECIBIDO", "SCG", "SISCAT", "SISTEMAS/OR"}
 
     ws_det.append(headers)
@@ -874,10 +815,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # El detalle siempre se ordena del registro más antiguo (1) al más
-    # reciente (último), independientemente del orden en que llegue el
-    # DataFrame (la pantalla de Consulta lo muestra del más reciente al más
-    # antiguo, pero el Excel de detalle debe ir en orden ascendente por ID).
     if 'id' in df_upper.columns:
         df_detalle = df_upper.sort_values(by='id', ascending=True, key=lambda s: pd.to_numeric(s, errors='coerce')).reset_index(drop=True)
     else:
@@ -922,8 +859,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
 def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mostrar_id=True):
     wb = Workbook()
     ws_sum = wb.active
-    # Mismos nombres de hoja que en el reporte de Oficios, para que ambos
-    # reportes ejecutivos tengan exactamente la misma estructura.
     ws_sum.title = "Resumen Ejecutivo"
     ws_det = wb.create_sheet(title="Detalle General")
 
@@ -966,7 +901,6 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
         c1.font, c2.font = font_regular, font_bold
         c1.border = c2.border = border_box
 
-    # GRÁFICA con los conteos (Total / Con PDF / Pendientes)
     chart_start_row = 11
     ws_sum.cell(row=chart_start_row, column=1, value="Métrica (Gráfica)").font = font_header
     ws_sum.cell(row=chart_start_row, column=1).fill = fill_header
@@ -994,8 +928,6 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
     chart_seg.set_categories(cats_ref)
     chart_seg.width = 18
     chart_seg.height = 9
-    # Igual que en el reporte de Oficios: se ancla junto a la tabla de
-    # métricas principal (fila 4) en vez de quedar debajo de ambas tablas.
     ws_sum.add_chart(chart_seg, "D4")
 
     headers_completos = ["ID", "DGCAT/FOLIO", "ESTADO", "MUNICIPIO", "EJIDO", "FECHA REGISTRO", "OBSERVACIONES", "ARCHIVO ESCANEADO", "REGISTRADO POR"]
@@ -1015,8 +947,6 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Orden ascendente (1 al último) en el detalle, igual que en el reporte
-    # de Oficios.
     if 'id' in df_upper.columns:
         df_detalle = df_upper.sort_values(by='id', ascending=True, key=lambda s: pd.to_numeric(s, errors='coerce')).reset_index(drop=True)
     else:
