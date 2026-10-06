@@ -2,6 +2,7 @@ import os
 import re
 import sqlite3
 import hashlib
+import base64
 import pandas as pd
 import streamlit as st
 from datetime import datetime
@@ -12,6 +13,34 @@ from openpyxl.utils import get_column_letter
 from openpyxl.chart import BarChart, Reference
 
 DB_FILE = "dgcat_gestion.db"
+
+# -----------------------------------------------------------------------------
+# VISOR DE PDF ANTI-BLOQUEO (BASE64)
+# -----------------------------------------------------------------------------
+def mostrar_pdf(ruta_pdf):
+    """
+    Lee un archivo PDF local, lo convierte a Base64 y lo despliega en Streamlit
+    evitando que Microsoft Edge o Chrome lo bloqueen como elemento inseguro.
+    """
+    if not os.path.exists(ruta_pdf):
+        st.warning("⚠️️ El archivo PDF físico no se encuentra en el servidor.")
+        return
+
+    try:
+        with open(ruta_pdf, "rb") as f:
+            pdf_data = f.read()
+        
+        base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
+        
+        pdf_display = f'''
+            <object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="600px">
+                <p>Tu navegador bloqueó la vista previa automática. 
+                <a href="data:application/pdf;base64,{base64_pdf}" download="expediente.pdf">Haga clic aquí para descargar y ver el PDF.</a></p>
+            </object>
+        '''
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Error al cargar la previsualización del PDF: {e}")
 
 # -----------------------------------------------------------------------------
 # CONEXIÓN BASE DE DATOS
@@ -273,8 +302,7 @@ def init_db():
                 """))
 
             # -----------------------------------------------------------------
-            # MIGRACIÓN AUTOMÁTICA DE COLUMNAS PARA BASE DE DATOS EXISTENTES (POSTGRES / SQLITE)
-            # Soluciona automáticamente el error "UndefinedColumn" en Producción.
+            # MIGRACIÓN AUTOMÁTICA DE COLUMNAS PARA BASE DE DATOS EXISTENTES
             # -----------------------------------------------------------------
             columnas_migracion = [
                 ("oficios", "sistemas_or", "TEXT"),
