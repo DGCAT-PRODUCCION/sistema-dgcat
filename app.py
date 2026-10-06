@@ -29,6 +29,7 @@ from database import (
     eliminar_archivo_adjunto,
     obtener_pagina,
     obtener_auditoria,
+    mostrar_pdf,
 )
 
 st.set_page_config(
@@ -81,13 +82,6 @@ _MESES_ES = {
 }
 
 def render_documentos_adicionales(modulo, registro_id, key_prefix):
-    """
-    Lista los documentos adicionales de un registro con: nombre, botón
-    'Ver' (vista previa embebida, igual que el expediente principal),
-    'Descargar' y 'Eliminar'. Se usa igual en Consulta de Expedientes DGCAT
-    y en Consulta de Seguimiento de Predio para que ambas pantallas se
-    comporten exactamente igual.
-    """
     st.markdown("**📎 Documentos adicionales**")
     adjuntos = obtener_archivos_adjuntos(modulo, registro_id)
     if not adjuntos:
@@ -120,20 +114,9 @@ def render_documentos_adicionales(modulo, registro_id, key_prefix):
                     st.error(msg)
 
         if adj_bytes is not None and st.session_state.get(ver_key, False):
-            b64_adj = base64.b64encode(adj_bytes).decode('utf-8')
-            st.markdown(
-                f'<iframe src="data:application/pdf;base64,{b64_adj}" width="100%" height="400" style="border:1px solid #D1D5DB; border-radius:8px;"></iframe>',
-                unsafe_allow_html=True
-            )
+            mostrar_pdf(adj_ruta)
 
 def flash(tipo, mensaje):
-    """
-    Guarda un mensaje para mostrarlo en la SIGUIENTE ejecución del script.
-    Es necesario porque llamar a st.success(...) justo antes de st.rerun()
-    casi nunca alcanza a mostrarse: el rerun reinicia el script de inmediato
-    y ese mensaje se pierde. Guardándolo en session_state, sobrevive al
-    refresco y se muestra ya con la información actualizada en pantalla.
-    """
     st.session_state.setdefault("_flash", []).append((tipo, mensaje))
 
 def mostrar_flash():
@@ -149,45 +132,22 @@ def mostrar_flash():
             st.info(mensaje)
 
 def es_pdf_valido(datos_archivo):
-    """
-    Valida que el contenido subido sea realmente un PDF legible antes de
-    guardarlo, para no aceptar archivos corruptos o renombrados que luego
-    aparecen "en blanco" al consultarlos.
-    - Revisa la firma binaria real de un PDF (%PDF-) en vez de confiar solo
-      en la extensión .pdf del nombre de archivo.
-    - Intenta abrirlo con pypdf para descartar archivos truncados o dañados.
-    Devuelve (es_valido: bool, motivo: str).
-    """
     if not datos_archivo:
         return False, "No se recibió ningún archivo."
     if len(datos_archivo) < 100:
         return False, "El archivo está vacío o es demasiado pequeño para ser un PDF válido."
     if not datos_archivo.lstrip()[:5] == b"%PDF-":
-        return False, "El archivo no tiene un formato PDF válido (falta la firma %PDF-). Puede estar corrupto o ser de otro tipo."
+        return False, "El archivo no tiene un formato PDF válido (falta la firma %PDF-)."
     try:
         import io
         from pypdf import PdfReader
         lector = PdfReader(io.BytesIO(datos_archivo))
         _ = len(lector.pages)
     except Exception:
-        return False, "El archivo parece dañado o incompleto y no pudo abrirse como PDF. Intente exportarlo/escanearlo de nuevo."
+        return False, "El archivo parece dañado o incompleto y no pudo abrirse como PDF."
     return True, ""
 
 def normalizar_para_mostrar(df, columnas_preservar=('id',)):
-    """
-    Deja todas las celdas vacías con la MISMA apariencia ("—") sin importar
-    si el valor original era None, NaN, cadena vacía o el texto literal
-    "None"/"nan" heredado de conversiones previas. Antes, columnas distintas
-    mostraban "NAN" o "None" según cómo hubiera llegado el dato, lo cual
-    parecía un error (como si fueran columnas distintas / datos corruptos)
-    cuando en realidad solo era un dato nunca capturado.
-
-    IMPORTANTE: se recorren TODAS las columnas, no solo las de tipo
-    'object': una columna que en la página actual no tiene NINGÚN valor
-    capturado (por ejemplo, "no_oficio" cuando todos los registros de esa
-    página lo tienen vacío) pandas la infiere como float64 en vez de
-    object, y quedaría fuera si solo se filtrara por dtype de texto.
-    """
     df = df.copy()
     for col in df.columns:
         if col in columnas_preservar:
@@ -198,18 +158,10 @@ def normalizar_para_mostrar(df, columnas_preservar=('id',)):
     return df
 
 def fecha_larga_es(fecha=None):
-    """Devuelve la fecha en formato 'día de mes de año' en español, sin
-    depender del locale del servidor (que puede no estar instalado)."""
     f = fecha or date.today()
     return f"{f.day} de {_MESES_ES[f.month]} de {f.year}"
 
 def resolver_ruta_pdf(nombre_archivo):
-    """
-    Busca el archivo dentro de UPLOADS_DIR de forma tolerante a diferencias
-    de mayúsculas/minúsculas (comunes al migrar entre Windows y Linux) y a
-    espacios en blanco accidentales en el nombre guardado en la base de
-    datos. Devuelve la ruta real si la encuentra, o None si no existe.
-    """
     if nombre_archivo is None:
         return None
     nombre_limpio = str(nombre_archivo).strip()
@@ -230,11 +182,6 @@ def resolver_ruta_pdf(nombre_archivo):
     return None
 
 def cargar_pdf_bytes(nombre_archivo):
-    """
-    Devuelve (bytes, ruta_resuelta, error). Nunca lanza una excepción hacia
-    afuera: cualquier problema de lectura se reporta como texto de error para
-    que la pantalla pueda mostrar un mensaje claro en vez de quedar en blanco.
-    """
     ruta = resolver_ruta_pdf(nombre_archivo)
     if ruta is None:
         return None, None, "no_existe"
@@ -246,8 +193,8 @@ def cargar_pdf_bytes(nombre_archivo):
         return contenido, ruta, None
     except Exception as e:
         return None, ruta, str(e)
-os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 init_db()
 
 if "authenticated" not in st.session_state:
@@ -263,7 +210,7 @@ if "rol" not in st.session_state:
 if not st.session_state["authenticated"]:
     st.markdown("""
     <div class="header-box">
-        <div class="header-title">🏛️ DIRECCIÓN GENERAL DE CATASTRO</div>
+        <div class="header-title">🏛️️ DIRECCIÓN GENERAL DE CATASTRO</div>
         <div class="header-subtitle">Sistema de Control de Entrada y Salida de Oficios de Respuesta</div>
         <hr class="header-line">
     </div>
@@ -321,8 +268,6 @@ ROL_ACTUAL = st.session_state["rol"]
 if ROL_ACTUAL == "operador":
     menu_options = ["📍 Seguimiento de Ubicación de Predio"]
 elif ROL_ACTUAL == "supervisor":
-    # El Supervisor tiene acceso operativo pero NO a la administración de
-    # usuarios: ese ítem se omite por completo de la lista de opciones.
     menu_options = [
         "📈 Dashboard Ejecutivo",
         "📝 Registro Completo de Oficios",
@@ -332,13 +277,12 @@ elif ROL_ACTUAL == "supervisor":
         "⚙️ Gestión de Catálogos",
     ]
 else:
-    # Solo el administrador ve "Gestión Completa de Usuarios".
     menu_options = [
         "📈 Dashboard Ejecutivo", 
         "📝 Registro Completo de Oficios", 
         "📍 Seguimiento de Ubicación de Predio", 
         "🔍 Consulta y Expedientes", 
-        "🗂️ Consulta de Seguimiento de Predio",
+        "🗂️️ Consulta de Seguimiento de Predio",
         "⚙️ Gestión de Catálogos",
         "👥 Alta de Usuarios"
     ]
@@ -395,11 +339,8 @@ if menu == "📈 Dashboard Ejecutivo":
         st.caption("Monitoreo institucional de oficios de respuesta, expedientes PDF digitalizados, SCG y SISCAT.")
     with col_refrescar:
         st.write("")
-        if st.button("🔄 Actualizar ahora", use_container_width=True, help="Fuerza a traer los datos más recientes de la base, sin esperar el caché de catálogos (10 min)."):
+        if st.button("🔄 Actualizar ahora", use_container_width=True, help="Fuerza a traer los datos más recientes de la base."):
             st.cache_data.clear()
-            # La bandera se guarda en session_state porque st.rerun() reinicia
-            # el script de inmediato: el mensaje de éxito se muestra recién
-            # en la siguiente ejecución, justo después del refresco.
             st.session_state["_dashboard_recien_actualizado"] = True
             st.rerun()
 
@@ -432,14 +373,12 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
     
-    # METRICAS DIRECTIVAS PRINCIPALES
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     total_oficios = len(df_filtered)
     concluidos_scg = len(df_filtered[df_filtered['scg'] == 'CONCLUIDO'])
     subidos_siscat = len(df_filtered[df_filtered['siscat'].isin(['CONCLUIDO', 'SUBIDO'])])
     en_sistemas = len(df_filtered[df_filtered['scg'].astype(str).str.contains('SISTEMAS', case=False, na=False)])
-    
     sistemas_or_val = len(df_filtered[df_filtered['sistemas_or'].notna() & (df_filtered['sistemas_or'].astype(str).str.strip() != '') & (df_filtered['sistemas_or'].astype(str).str.upper() != 'NONE')]) if 'sistemas_or' in df_filtered.columns else 0
     
     pct_scg = round((concluidos_scg / total_oficios * 100), 1) if total_oficios > 0 else 0
@@ -453,7 +392,6 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 1. CONTROL DIGITAL DE EXPEDIENTES PDF
     st.subheader("📄 Control Digital de Expedientes PDF")
     has_pdf = df_filtered['archivo_escaneado'].notna() & (df_filtered['archivo_escaneado'] != '') & (df_filtered['archivo_escaneado'] != 'NONE')
     pdf_subidos = len(df_filtered[has_pdf])
@@ -479,10 +417,7 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
 
-    # 2. SECCIÓN DE BANDEJAS SCG Y SISCAT
     g_col1, g_col2 = st.columns(2)
-
-    # BANDEJA SCG EN FORMATO CIRCULAR / PIE
     with g_col1:
         st.subheader("🍩 Distribución por Bandeja SCG")
         scg_counts = df_filtered['scg'].value_counts().reset_index()
@@ -509,10 +444,7 @@ if menu == "📈 Dashboard Ejecutivo":
 
     st.markdown("---")
 
-    # 3. TOP ESTADOS Y VOLUMETRÍA POR TIPO DE TRÁMITE
     g_col3, g_col4 = st.columns(2)
-
-    # TOP ESTADOS: ESCALA 'Greens' (VERDE OSCURO PARA EL MAYOR / VERACRUZ)
     with g_col3:
         st.subheader("🇲🇽 Top 10 Estados con Mayor Carga Registrada")
         top_estados = df_filtered['estado'].value_counts().head(10).reset_index()
@@ -521,16 +453,6 @@ if menu == "📈 Dashboard Ejecutivo":
             top_estados, x='Estado', y='Oficios', color='Oficios', text='Oficios', 
             color_continuous_scale='Greens'
         )
-        # Antes el texto se ponía "inside" y en blanco: en barras cortas
-        # (estados con pocos oficios) Plotly no tiene espacio para dibujar el
-        # número dentro de la barra y lo oculta por completo, dando la
-        # sensación de que "se pierden" los números. Además, si el navegador
-        # del usuario está en modo oscuro, un color de texto oscuro también
-        # se vuelve invisible sobre fondo oscuro. Para evitarlo del todo, se
-        # fija el fondo de la gráfica en blanco de forma explícita (paper_
-        # bgcolor/plot_bgcolor), independientemente del tema del navegador,
-        # y el texto se dibuja "outside" en color oscuro con cliponaxis=False
-        # para que nunca quede recortado ni oculto.
         fig_top_estados.update_traces(
             textposition='outside', textfont_color='#111827', textfont_size=13, cliponaxis=False
         )
@@ -544,7 +466,6 @@ if menu == "📈 Dashboard Ejecutivo":
         )
         st.plotly_chart(fig_top_estados, use_container_width=True)
 
-    # VOLUMETRÍA POR TIPO DE TRÁMITE (BARRAS HORIZONTALES)
     with g_col4:
         st.subheader("📑 Volumetría por Tipo de Trámite")
         
@@ -552,17 +473,14 @@ if menu == "📈 Dashboard Ejecutivo":
             t_actual = str(row.get('tipo_tramite', '')).strip().upper()
             if t_actual and t_actual not in ['NONE', 'NAN', '']:
                 return t_actual
-            
             obs = str(row.get('observaciones', '')).upper()
             scg = str(row.get('scg', '')).upper()
             txt = obs + " " + scg
-            
             if 'DESTINO' in txt: return 'CAMBIO DE DESTINO'
             if 'SUPERFICIE' in txt: return 'CAMBIO DE SUPERFICIE'
             if 'DOMINIO' in txt: return 'DOMINIO PLENO'
             if 'MOSAICO' in txt: return 'ACT. DE MOSAICO'
             if 'SENTENCIA' in txt: return 'SENTENCIA'
-            
             return 'PENDIENTE DE CLASIFICAR'
 
         tramites_series = df_filtered.apply(inferir_tramite, axis=1)
@@ -589,9 +507,8 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
     df_seg_todo = pd.read_sql("SELECT * FROM seguimiento_predio ORDER BY id DESC", engine)
     df_seg_todo.columns = [c.lower() for c in df_seg_todo.columns]
 
-    modo_seg = st.radio("Modo:", ["➕ Nuevo Registro", "✏️️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True, key="modo_seg")
+    modo_seg = st.radio("Modo:", ["➕ Nuevo Registro", "✏ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True, key="modo_seg")
 
-    # Contador para forzar limpieza limpia tras guardar o cambiar de modo
     if "reset_count_seg" not in st.session_state:
         st.session_state["reset_count_seg"] = 0
 
@@ -628,7 +545,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
             st.warning("No hay registros de seguimiento en la base de datos.")
             st.stop()
         if df_busqueda_seg.empty:
-            st.warning("⚠️ No se encontró ningún registro que coincida con la búsqueda.")
+            st.warning("⚠️️ No se encontró ningún registro que coincida con la búsqueda.")
             st.stop()
 
         df_busqueda_seg = df_busqueda_seg.copy()
@@ -751,6 +668,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
+
 # -----------------------------------------------------------------------------
 # 3. REGISTRO COMPLETO DE OFICIOS
 # -----------------------------------------------------------------------------
@@ -932,7 +850,7 @@ elif menu == "📝 Registro Completo de Oficios":
                 municipio_upper = municipio_sel.strip().upper()
                 ejido_upper = ejido_sel.strip().upper()
                 scg_upper = scg_sel.strip().upper()
-                siscat_upper = siscat_sett = siscat_sel.strip().upper()
+                siscat_upper = siscat_sel.strip().upper()
                 sistemas_or_upper = sistemas_or_sel.strip().upper()
                 tramite_upper = tipo_tramite.strip().upper()
 
@@ -974,7 +892,6 @@ elif menu == "🔍 Consulta y Expedientes":
     st.title("🔍 Consulta de Expedientes DGCAT y Descarga de PDF")
     st.caption(f"📅 Información actualizada: {fecha_larga_es()}")
 
-    # --- Búsqueda (se aplica en SQL, ANTES de paginar) ---------------------
     texto_busqueda_consulta = st.text_input("🔎 Buscar por folio DGCAT, No. de oficio o Estado (opcional):", key="busq_consulta_oficios")
     if texto_busqueda_consulta.strip():
         patron = f"%{texto_busqueda_consulta.strip().upper()}%"
@@ -983,7 +900,6 @@ elif menu == "🔍 Consulta y Expedientes":
     else:
         filtro_sql, params_filtro = "", {}
 
-    # --- Controles de paginación --------------------------------------------
     col_pag1, col_pag2, col_pag3 = st.columns([1, 1, 2])
     with col_pag1:
         tam_pagina = st.selectbox("Registros por página", [100, 200, 500], index=1, key="tam_pag_oficios")
@@ -1015,10 +931,7 @@ elif menu == "🔍 Consulta y Expedientes":
                 st.session_state["pagina_oficios"] += 1
                 st.rerun()
 
-    # El ID interno se conserva en el DataFrame para las operaciones (selector
-    # de expediente, adjuntos, etc.) pero se OCULTA de lo que ve el usuario.
     df_display = normalizar_para_mostrar(df_pagina)
-
     st.dataframe(df_display.drop(columns=['id']), use_container_width=True)
 
     st.markdown("---")
@@ -1027,12 +940,6 @@ elif menu == "🔍 Consulta y Expedientes":
     if total_registros == 0:
         st.info("ℹ️ No hay expedientes registrados.")
     else:
-        # El selector de expediente busca en TODA la tabla (no solo en la
-        # página visible), usando el mismo texto de búsqueda de arriba.
-        # Ya no se muestra el ID interno (confundía, parecía un "número de
-        # lista" en vez de un identificador técnico). Si dos expedientes
-        # comparten folio, se distinguen con un sufijo (2), (3)... en vez del
-        # ID interno.
         df_selector, _ = obtener_pagina(
             "oficios", columnas="id, dgcat", filtro_sql=filtro_sql, params=params_filtro,
             order_by="id DESC", page=1, page_size=2000
@@ -1062,11 +969,7 @@ elif menu == "🔍 Consulta y Expedientes":
             elif error_pdf is not None:
                 st.error(f"⚠️ No se pudo cargar el archivo ({error_pdf}). Intente volver a subirlo.")
             else:
-                b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-                st.markdown(
-                    f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="450" style="border:1px solid #D1D5DB; border-radius:8px;"></iframe>',
-                    unsafe_allow_html=True
-                )
+                mostrar_pdf(ruta_resuelta)
                 st.download_button("📥 Descargar PDF Principal", pdf_bytes, file_name=os.path.basename(ruta_resuelta), mime="application/pdf", type="primary", key="dl_principal")
 
         with col_v2:
@@ -1075,8 +978,6 @@ elif menu == "🔍 Consulta y Expedientes":
             if nuevo_adjunto is not None and st.button("📤 Guardar documento adicional", key=f"adj_btn_{id_expediente}"):
                 es_valido, motivo = es_pdf_valido(nuevo_adjunto.getvalue())
                 if not es_valido:
-                    # Restricción pedida: si no se puede visualizar como PDF,
-                    # no se deja subir en absoluto.
                     st.error(f"❌ No se guardó: {motivo} Vuelva a intentar con otro archivo.")
                 else:
                     nombre_adj = f"ADJ_{id_expediente}_{nuevo_adjunto.name}"
@@ -1092,9 +993,6 @@ elif menu == "🔍 Consulta y Expedientes":
         render_documentos_adicionales("oficios", id_expediente, key_prefix="of")
 
     st.markdown("---")
-    # El Excel del Reporte Ejecutivo se genera con el conjunto COMPLETO de
-    # resultados filtrados (no solo la página visible en pantalla), porque un
-    # reporte ejecutivo debe reflejar todo lo consultado.
     df_export, _ = obtener_pagina("oficios", columnas="*", filtro_sql=filtro_sql, params=params_filtro, order_by="id DESC", page=1, page_size=100000)
     df_export.columns = [c.lower() for c in df_export.columns]
     excel_file = generar_excel_ejecutivo(df_export, mostrar_id=False)
@@ -1102,7 +1000,7 @@ elif menu == "🔍 Consulta y Expedientes":
         st.download_button("📊 Descargar Reporte Ejecutivo en Excel (.xlsx)", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # -----------------------------------------------------------------------------
-# 4B. CONSULTA DE SEGUIMIENTO DE UBICACIÓN DE PREDIO (base independiente)
+# 4B. CONSULTA DE SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
 elif menu == "🗂️ Consulta de Seguimiento de Predio":
     st.title("🗂️ Consulta de Seguimiento de Ubicación de Predio")
@@ -1148,7 +1046,6 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
                 st.rerun()
 
     df_seg_display = normalizar_para_mostrar(df_pagina_seg)
-
     st.dataframe(df_seg_display.drop(columns=['id']), use_container_width=True)
 
     st.markdown("---")
@@ -1186,11 +1083,7 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
             elif error_pdf_seg is not None:
                 st.error(f"⚠️ No se pudo cargar el archivo ({error_pdf_seg}). Intente volver a subirlo.")
             else:
-                b64_pdf_seg = base64.b64encode(pdf_bytes_seg).decode('utf-8')
-                st.markdown(
-                    f'<iframe src="data:application/pdf;base64,{b64_pdf_seg}" width="100%" height="450" style="border:1px solid #D1D5DB; border-radius:8px;"></iframe>',
-                    unsafe_allow_html=True
-                )
+                mostrar_pdf(ruta_resuelta_seg)
                 st.download_button("📥 Descargar PDF Principal", pdf_bytes_seg, file_name=os.path.basename(ruta_resuelta_seg), mime="application/pdf", type="primary", key="dl_principal_seg")
 
         with col_v2:
@@ -1327,10 +1220,6 @@ elif menu == "⚙️ Gestión de Catálogos":
 # 6. ALTA DE USUARIOS
 # -----------------------------------------------------------------------------
 elif menu == "👥 Alta de Usuarios":
-    # Segunda barrera de seguridad: aunque el menú ya oculta esta opción para
-    # el Supervisor, el backend vuelve a validar el rol aquí antes de
-    # ejecutar cualquier lógica de administración de usuarios. Ocultar el
-    # botón no es suficiente si alguien intenta forzar el estado del menú.
     if ROL_ACTUAL != "admin":
         st.error("⛔ Acceso no autorizado. Esta sección es exclusiva del Administrador.")
         st.stop()
@@ -1403,10 +1292,6 @@ elif menu == "👥 Alta de Usuarios":
                         ok, msg = eliminar_usuario(usuario_gestionar)
                         if ok:
                             st.cache_data.clear()
-                            # Se limpia la selección para que el selectbox no
-                            # intente mostrar un usuario que ya no existe
-                            # (evita error y evita "quedarse pegado" al
-                            # usuario recién eliminado).
                             if "sel_usuario_gestionar" in st.session_state:
                                 del st.session_state["sel_usuario_gestionar"]
                             flash("success", f"✅ {msg}")
