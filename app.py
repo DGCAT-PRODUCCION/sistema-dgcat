@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import base64
 import plotly.express as px
+import streamlit.components.v1 as components
 from datetime import date, datetime
 from sqlalchemy import text
 from database import (
@@ -81,6 +82,19 @@ _MESES_ES = {
     7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
 }
 
+def mostrar_pdf_embed(ruta_pdf):
+    """Renderiza el PDF en pantalla mediante iframe base64 sin bloqueos del navegador."""
+    try:
+        if not os.path.exists(ruta_pdf):
+            st.error("El archivo PDF no existe en el servidor.")
+            return
+        with open(ruta_pdf, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="650" type="application/pdf" style="border:none; border-radius:8px;"></iframe>'
+        components.html(pdf_display, height=660)
+    except Exception as e:
+        st.error(f"Error al desplegar el PDF: {e}")
+
 def render_documentos_adicionales(modulo, registro_id, key_prefix):
     st.markdown("**📎 Documentos adicionales**")
     adjuntos = obtener_archivos_adjuntos(modulo, registro_id)
@@ -114,7 +128,7 @@ def render_documentos_adicionales(modulo, registro_id, key_prefix):
                     st.error(msg)
 
         if adj_bytes is not None and st.session_state.get(ver_key, False):
-            mostrar_pdf(adj_ruta)
+            mostrar_pdf_embed(adj_ruta)
 
 def flash(tipo, mensaje):
     st.session_state.setdefault("_flash", []).append((tipo, mensaje))
@@ -147,7 +161,7 @@ def es_pdf_valido(datos_archivo):
         return False, "El archivo parece dañado o incompleto y no pudo abrirse como PDF."
     return True, ""
 
-def normalizar_para_mostrar(df, columnas_preservar=('id',)):
+def normalizar_para_mostrar(df, columnas_preservar=('id', '#')):
     df = df.copy()
     for col in df.columns:
         if col in columnas_preservar:
@@ -210,7 +224,7 @@ if "rol" not in st.session_state:
 if not st.session_state["authenticated"]:
     st.markdown("""
     <div class="header-box">
-        <div class="header-title">🏛️️ DIRECCIÓN GENERAL DE CATASTRO</div>
+        <div class="header-title">🏛 DIRECCIÓN GENERAL DE CATASTRO</div>
         <div class="header-subtitle">Sistema de Control de Entrada y Salida de Oficios de Respuesta</div>
         <hr class="header-line">
     </div>
@@ -282,7 +296,7 @@ else:
         "📝 Registro Completo de Oficios", 
         "📍 Seguimiento de Ubicación de Predio", 
         "🔍 Consulta y Expedientes", 
-        "🗂️️ Consulta de Seguimiento de Predio",
+        "🗂️ Consulta de Seguimiento de Predio",
         "⚙️ Gestión de Catálogos",
         "👥 Alta de Usuarios"
     ]
@@ -504,10 +518,10 @@ if menu == "📈 Dashboard Ejecutivo":
 elif menu == "📍 Seguimiento de Ubicación de Predio":
     st.title("📍 Seguimiento de Ubicación de Predio")
 
-    df_seg_todo = pd.read_sql("SELECT * FROM seguimiento_predio ORDER BY id DESC", engine)
+    df_seg_todo = pd.read_sql("SELECT * FROM seguimiento_predio ORDER BY id ASC", engine)
     df_seg_todo.columns = [c.lower() for c in df_seg_todo.columns]
 
-    modo_seg = st.radio("Modo:", ["➕ Nuevo Registro", "✏ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True, key="modo_seg")
+    modo_seg = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True, key="modo_seg")
 
     if "reset_count_seg" not in st.session_state:
         st.session_state["reset_count_seg"] = 0
@@ -545,7 +559,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
             st.warning("No hay registros de seguimiento en la base de datos.")
             st.stop()
         if df_busqueda_seg.empty:
-            st.warning("⚠️️ No se encontró ningún registro que coincida con la búsqueda.")
+            st.warning("⚠️ No se encontró ningún registro que coincida con la búsqueda.")
             st.stop()
 
         df_busqueda_seg = df_busqueda_seg.copy()
@@ -675,7 +689,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
 
-    df_oficios = pd.read_sql("SELECT * FROM oficios ORDER BY id DESC", engine)
+    df_oficios = pd.read_sql("SELECT * FROM oficios ORDER BY id ASC", engine)
     df_oficios.columns = [c.lower() for c in df_oficios.columns]
 
     modo_accion = st.radio("Modo:", ["➕ Nuevo Registro", "✏️ Modificar Registro Existente", "🗑️ Eliminar Registro"], horizontal=True)
@@ -709,7 +723,7 @@ elif menu == "📝 Registro Completo de Oficios":
             if df_busqueda.empty:
                 st.caption("ℹ️ No se encontró ningún oficio parecido; puede continuar con la captura.")
             else:
-                st.caption("ℹ️ Coincidencias existentes (solo referencia, no bloquea la captura):")
+                st.caption("ℹ️️ Coincidencias existentes (solo referencia, no bloquea la captura):")
                 st.dataframe(df_busqueda[['id', 'dgcat', 'no_oficio', 'estado']].head(10), use_container_width=True)
     else:
         if df_oficios.empty:
@@ -734,7 +748,7 @@ elif menu == "📝 Registro Completo de Oficios":
         id_oficio_seleccionado = int(df_busqueda.loc[df_busqueda['display_name'] == seleccion, 'id'].iloc[0])
         oficio_sel = df_oficios[df_oficios['id'] == id_oficio_seleccionado].iloc[0]
 
-    if modo_accion == "🗑️️ Eliminar Registro" and oficio_sel is not None:
+    if modo_accion == "🗑️ Eliminar Registro" and oficio_sel is not None:
         st.error(f"⚠️ Eliminar oficio **{oficio_sel['dgcat']}**.")
         confirmar = st.checkbox("Confirmo que deseo eliminar este registro de forma DEFINITIVA.", key=f"confirm_del_of_{cnt_o}")
         if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary", disabled=not confirmar, key=f"btn_del_of_{cnt_o}"):
@@ -909,7 +923,7 @@ elif menu == "🔍 Consulta y Expedientes":
     cols_order = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
     df_pagina, total_registros = obtener_pagina(
         "oficios", columnas=", ".join(cols_order), filtro_sql=filtro_sql, params=params_filtro,
-        order_by="id DESC", page=st.session_state["pagina_oficios"], page_size=tam_pagina
+        order_by="id ASC", page=st.session_state["pagina_oficios"], page_size=tam_pagina
     )
     df_pagina.columns = [c.lower() for c in df_pagina.columns]
     total_paginas = max((total_registros - 1) // tam_pagina + 1, 1)
@@ -931,6 +945,9 @@ elif menu == "🔍 Consulta y Expedientes":
                 st.session_state["pagina_oficios"] += 1
                 st.rerun()
 
+    offset_inicio = (st.session_state["pagina_oficios"] - 1) * tam_pagina
+    df_pagina.insert(0, '#', range(offset_inicio + 1, offset_inicio + 1 + len(df_pagina)))
+
     df_display = normalizar_para_mostrar(df_pagina)
     st.dataframe(df_display.drop(columns=['id']), use_container_width=True)
 
@@ -942,7 +959,7 @@ elif menu == "🔍 Consulta y Expedientes":
     else:
         df_selector, _ = obtener_pagina(
             "oficios", columnas="id, dgcat", filtro_sql=filtro_sql, params=params_filtro,
-            order_by="id DESC", page=1, page_size=2000
+            order_by="id ASC", page=1, page_size=2000
         )
         df_selector['folio_mostrado'] = df_selector['dgcat'].astype(str).str.upper()
         conteo_repetidos = {}
@@ -969,7 +986,7 @@ elif menu == "🔍 Consulta y Expedientes":
             elif error_pdf is not None:
                 st.error(f"⚠️ No se pudo cargar el archivo ({error_pdf}). Intente volver a subirlo.")
             else:
-                mostrar_pdf(ruta_resuelta)
+                mostrar_pdf_embed(ruta_resuelta)
                 st.download_button("📥 Descargar PDF Principal", pdf_bytes, file_name=os.path.basename(ruta_resuelta), mime="application/pdf", type="primary", key="dl_principal")
 
         with col_v2:
@@ -993,8 +1010,9 @@ elif menu == "🔍 Consulta y Expedientes":
         render_documentos_adicionales("oficios", id_expediente, key_prefix="of")
 
     st.markdown("---")
-    df_export, _ = obtener_pagina("oficios", columnas="*", filtro_sql=filtro_sql, params=params_filtro, order_by="id DESC", page=1, page_size=100000)
+    df_export, _ = obtener_pagina("oficios", columnas="*", filtro_sql=filtro_sql, params=params_filtro, order_by="id ASC", page=1, page_size=100000)
     df_export.columns = [c.lower() for c in df_export.columns]
+    df_export.insert(0, '#', range(1, len(df_export) + 1))
     excel_file = generar_excel_ejecutivo(df_export, mostrar_id=False)
     with open(excel_file, "rb") as f:
         st.download_button("📊 Descargar Reporte Ejecutivo en Excel (.xlsx)", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -1023,7 +1041,7 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
     cols_order_seg = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'fecha_actualizacion', 'observaciones', 'archivo_escaneado', 'registrado_por']
     df_pagina_seg, total_seg = obtener_pagina(
         "seguimiento_predio", columnas=", ".join(cols_order_seg), filtro_sql=filtro_sql_seg, params=params_filtro_seg,
-        order_by="id DESC", page=st.session_state["pagina_seg"], page_size=tam_pagina_seg
+        order_by="id ASC", page=st.session_state["pagina_seg"], page_size=tam_pagina_seg
     )
     df_pagina_seg.columns = [c.lower() for c in df_pagina_seg.columns]
     total_paginas_seg = max((total_seg - 1) // tam_pagina_seg + 1, 1)
@@ -1045,6 +1063,9 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
                 st.session_state["pagina_seg"] += 1
                 st.rerun()
 
+    offset_inicio_seg = (st.session_state["pagina_seg"] - 1) * tam_pagina_seg
+    df_pagina_seg.insert(0, '#', range(offset_inicio_seg + 1, offset_inicio_seg + 1 + len(df_pagina_seg)))
+
     df_seg_display = normalizar_para_mostrar(df_pagina_seg)
     st.dataframe(df_seg_display.drop(columns=['id']), use_container_width=True)
 
@@ -1056,7 +1077,7 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
     else:
         df_selector_seg, _ = obtener_pagina(
             "seguimiento_predio", columnas="id, dgcat", filtro_sql=filtro_sql_seg, params=params_filtro_seg,
-            order_by="id DESC", page=1, page_size=2000
+            order_by="id ASC", page=1, page_size=2000
         )
         df_selector_seg['folio_mostrado'] = df_selector_seg['dgcat'].astype(str).str.upper()
         conteo_repetidos_seg = {}
@@ -1083,7 +1104,7 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
             elif error_pdf_seg is not None:
                 st.error(f"⚠️ No se pudo cargar el archivo ({error_pdf_seg}). Intente volver a subirlo.")
             else:
-                mostrar_pdf(ruta_resuelta_seg)
+                mostrar_pdf_embed(ruta_resuelta_seg)
                 st.download_button("📥 Descargar PDF Principal", pdf_bytes_seg, file_name=os.path.basename(ruta_resuelta_seg), mime="application/pdf", type="primary", key="dl_principal_seg")
 
         with col_v2:
@@ -1107,8 +1128,9 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
         render_documentos_adicionales("seguimiento_predio", id_predio, key_prefix="seg")
 
     st.markdown("---")
-    df_export_seg, _ = obtener_pagina("seguimiento_predio", columnas="*", filtro_sql=filtro_sql_seg, params=params_filtro_seg, order_by="id DESC", page=1, page_size=100000)
+    df_export_seg, _ = obtener_pagina("seguimiento_predio", columnas="*", filtro_sql=filtro_sql_seg, params=params_filtro_seg, order_by="id ASC", page=1, page_size=100000)
     df_export_seg.columns = [c.lower() for c in df_export_seg.columns]
+    df_export_seg.insert(0, '#', range(1, len(df_export_seg) + 1))
     excel_file_seg = generar_excel_seguimiento(df_export_seg, mostrar_id=False)
     with open(excel_file_seg, "rb") as f:
         st.download_button("📊 Descargar Reporte de Seguimiento en Excel (.xlsx)", f, file_name="Reporte_Seguimiento_Predio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_excel_seg")
@@ -1185,7 +1207,7 @@ elif menu == "⚙️ Gestión de Catálogos":
 
                 if btn_modificar:
                     if opcion_sel == placeholder_opcion:
-                        st.warning("⚠️ Debe seleccionar un elemento.")
+                        st.warning("⚠️️ Debe seleccionar un elemento.")
                     elif not nuevo_nombre.strip():
                         st.warning("⚠️ Escriba el nuevo nombre.")
                     else:
