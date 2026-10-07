@@ -1002,11 +1002,13 @@ elif menu == "🔍 Consulta y Expedientes":
                 st.session_state["pagina_oficios"] += 1
                 st.rerun()
 
+    # En la vista interactiva:
     offset_inicio = (st.session_state["pagina_oficios"] - 1) * tam_pagina
     df_pagina.insert(0, '#', range(offset_inicio + 1, offset_inicio + 1 + len(df_pagina)))
 
     df_display = normalizar_para_mostrar(df_pagina)
-    st.dataframe(df_display.drop(columns=['id']), use_container_width=True)
+    # Se oculta la columna que empieza en 0 con hide_index=True:
+    st.dataframe(df_display.drop(columns=['id']), use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.subheader("📁 Visor, Descarga y Documentos Adicionales por Expediente")
@@ -1067,9 +1069,15 @@ elif menu == "🔍 Consulta y Expedientes":
         render_documentos_adicionales("oficios", id_expediente, key_prefix="of")
 
     st.markdown("---")
+    # En la exportación a Excel:
     df_export, _ = obtener_pagina("oficios", columnas="*", filtro_sql=filtro_sql, params=params_filtro, order_by="id ASC", page=1, page_size=100000)
     df_export.columns = [c.lower() for c in df_export.columns]
+    
+    # Se elimina la columna id de la BD si existe y se inserta el consecutivo # (1 al N)
+    if 'id' in df_export.columns:
+        df_export = df_export.drop(columns=['id'])
     df_export.insert(0, '#', range(1, len(df_export) + 1))
+    
     excel_file = generar_excel_ejecutivo(df_export, mostrar_id=False)
     with open(excel_file, "rb") as f:
         st.download_button("📊 Descargar Reporte Ejecutivo en Excel (.xlsx)", f, file_name="Reporte_DGCAT_Ejecutivo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -1119,13 +1127,13 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
             if st.button("Siguiente ➡️", disabled=(st.session_state["pagina_seg"] >= total_paginas_seg), use_container_width=True, key="btn_next_seg"):
                 st.session_state["pagina_seg"] += 1
                 st.rerun()
-
+    # En la vista interactiva:
     offset_inicio_seg = (st.session_state["pagina_seg"] - 1) * tam_pagina_seg
     df_pagina_seg.insert(0, '#', range(offset_inicio_seg + 1, offset_inicio_seg + 1 + len(df_pagina_seg)))
 
     df_seg_display = normalizar_para_mostrar(df_pagina_seg)
-    st.dataframe(df_seg_display.drop(columns=['id']), use_container_width=True)
-
+    # Se oculta la columna que empieza en 0 con hide_index=True:
+    st.dataframe(df_seg_display.drop(columns=['id']), use_container_width=True, hide_index=True)
     st.markdown("---")
     st.subheader("📁 Visor, Descarga y Documentos Adicionales por Predio")
 
@@ -1185,9 +1193,15 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
         render_documentos_adicionales("seguimiento_predio", id_predio, key_prefix="seg")
 
     st.markdown("---")
+    # En la exportación a Excel:
     df_export_seg, _ = obtener_pagina("seguimiento_predio", columnas="*", filtro_sql=filtro_sql_seg, params=params_filtro_seg, order_by="id ASC", page=1, page_size=100000)
     df_export_seg.columns = [c.lower() for c in df_export_seg.columns]
+    
+    # Se elimina la columna id de la BD si existe y se inserta el consecutivo # (1 al N)
+    if 'id' in df_export_seg.columns:
+        df_export_seg = df_export_seg.drop(columns=['id'])
     df_export_seg.insert(0, '#', range(1, len(df_export_seg) + 1))
+    
     excel_file_seg = generar_excel_seguimiento(df_export_seg, mostrar_id=False)
     with open(excel_file_seg, "rb") as f:
         st.download_button("📊 Descargar Reporte de Seguimiento en Excel (.xlsx)", f, file_name="Reporte_Seguimiento_Predio.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_excel_seg")
