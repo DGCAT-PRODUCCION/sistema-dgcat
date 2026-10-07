@@ -82,16 +82,22 @@ _MESES_ES = {
     7: "julio", 8: "agosto", 9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
 }
 
-def mostrar_pdf_embed(ruta_pdf):
-    """Renderiza el PDF en pantalla mediante iframe base64 sin bloqueos del navegador."""
+def render_visor_pdf_antibloqueo(ruta_pdf):
+    """Renderiza el PDF evitando el bloqueo de seguridad de Microsoft Edge y Chrome."""
     try:
         if not os.path.exists(ruta_pdf):
             st.error("El archivo PDF no existe en el servidor.")
             return
         with open(ruta_pdf, "rb") as f:
             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="650" type="application/pdf" style="border:none; border-radius:8px;"></iframe>'
-        components.html(pdf_display, height=660)
+        
+        pdf_display = f'''
+            <object data="data:application/pdf;base64,{base64_pdf}#toolbar=1&navpanes=0&scrollbar=1" type="application/pdf" width="100%" height="650px">
+                <embed src="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="650px" />
+                <p>Su navegador no soporta la vista previa directa. Puede descargar el archivo con el botón de abajo.</p>
+            </object>
+        '''
+        st.markdown(pdf_display, unsafe_allow_html=True)
     except Exception as e:
         st.error(f"Error al desplegar el PDF: {e}")
 
@@ -128,7 +134,7 @@ def render_documentos_adicionales(modulo, registro_id, key_prefix):
                     st.error(msg)
 
         if adj_bytes is not None and st.session_state.get(ver_key, False):
-            mostrar_pdf_embed(adj_ruta)
+            render_visor_pdf_antibloqueo(adj_ruta)
 
 def flash(tipo, mensaje):
     st.session_state.setdefault("_flash", []).append((tipo, mensaje))
@@ -682,9 +688,8 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
-
-# -----------------------------------------------------------------------------
-# 3. REGISTRO COMPLETO DE OFICIOS
+                    # -----------------------------------------------------------------------------
+# 3. REGISTRO COMPLETO DE OFICIOS (Continuación)
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -723,7 +728,7 @@ elif menu == "📝 Registro Completo de Oficios":
             if df_busqueda.empty:
                 st.caption("ℹ️ No se encontró ningún oficio parecido; puede continuar con la captura.")
             else:
-                st.caption("ℹ️️ Coincidencias existentes (solo referencia, no bloquea la captura):")
+                st.caption("ℹ️ Coincidencias existentes (solo referencia, no bloquea la captura):")
                 st.dataframe(df_busqueda[['id', 'dgcat', 'no_oficio', 'estado']].head(10), use_container_width=True)
     else:
         if df_oficios.empty:
@@ -986,7 +991,7 @@ elif menu == "🔍 Consulta y Expedientes":
             elif error_pdf is not None:
                 st.error(f"⚠️ No se pudo cargar el archivo ({error_pdf}). Intente volver a subirlo.")
             else:
-                mostrar_pdf_embed(ruta_resuelta)
+                render_visor_pdf_antibloqueo(ruta_resuelta)
                 st.download_button("📥 Descargar PDF Principal", pdf_bytes, file_name=os.path.basename(ruta_resuelta), mime="application/pdf", type="primary", key="dl_principal")
 
         with col_v2:
@@ -1104,7 +1109,7 @@ elif menu == "🗂️ Consulta de Seguimiento de Predio":
             elif error_pdf_seg is not None:
                 st.error(f"⚠️ No se pudo cargar el archivo ({error_pdf_seg}). Intente volver a subirlo.")
             else:
-                mostrar_pdf_embed(ruta_resuelta_seg)
+                render_visor_pdf_antibloqueo(ruta_resuelta_seg)
                 st.download_button("📥 Descargar PDF Principal", pdf_bytes_seg, file_name=os.path.basename(ruta_resuelta_seg), mime="application/pdf", type="primary", key="dl_principal_seg")
 
         with col_v2:
@@ -1207,7 +1212,7 @@ elif menu == "⚙️ Gestión de Catálogos":
 
                 if btn_modificar:
                     if opcion_sel == placeholder_opcion:
-                        st.warning("⚠️️ Debe seleccionar un elemento.")
+                        st.warning("⚠️ Debe seleccionar un elemento.")
                     elif not nuevo_nombre.strip():
                         st.warning("⚠️ Escriba el nuevo nombre.")
                     else:
