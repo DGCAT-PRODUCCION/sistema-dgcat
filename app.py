@@ -83,7 +83,7 @@ _MESES_ES = {
 }
 
 def render_visor_pdf_antibloqueo(ruta_pdf):
-    """Renderiza el PDF evitando el bloqueo de seguridad de Microsoft Edge y Chrome."""
+    """Renderiza el PDF usando PDF.js para evitar bloqueos de seguridad en Edge/Chrome."""
     try:
         if not os.path.exists(ruta_pdf):
             st.error("El archivo PDF no existe en el servidor.")
@@ -91,13 +91,64 @@ def render_visor_pdf_antibloqueo(ruta_pdf):
         with open(ruta_pdf, "rb") as f:
             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
         
-        pdf_display = f'''
-            <object data="data:application/pdf;base64,{base64_pdf}#toolbar=1&navpanes=0&scrollbar=1" type="application/pdf" width="100%" height="650px">
-                <embed src="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="650px" />
-                <p>Su navegador no soporta la vista previa directa. Puede descargar el archivo con el botón de abajo.</p>
-            </object>
+        # Oipuru PDF.js CDN ikatu hag̃uáicha ohechauka PDF oimeraẽva navegador-pe
+        pdf_js_html = f'''
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+                <style>
+                    #pdf-container {{
+                        width: 100%;
+                        height: 650px;
+                        overflow: auto;
+                        background-color: #525659;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        padding: 10px 0;
+                    }}
+                    canvas {{
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                        margin-bottom: 10px;
+                        max-width: 98%;
+                    }}
+                </style>
+            </head>
+            <body style="margin:0; padding:0;">
+                <div id="pdf-container"></div>
+                <script>
+                    const pdfData = atob("{base64_pdf}");
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+                    const loadingTask = pdfjsLib.getDocument({{data: pdfData}});
+                    loadingTask.promise.then(function(pdf) {{
+                        const container = document.getElementById('pdf-container');
+                        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
+                            pdf.getPage(pageNum).then(function(page) {{
+                                const scale = 1.3;
+                                const viewport = page.getViewport({{scale: scale}});
+                                const canvas = document.createElement('canvas');
+                                const context = canvas.getContext('2d');
+                                canvas.height = viewport.height;
+                                canvas.width = viewport.width;
+                                container.appendChild(canvas);
+
+                                const renderContext = {{
+                                    canvasContext: context,
+                                    viewport: viewport
+                                }};
+                                page.render(renderContext);
+                            }});
+                        }}
+                    }}).catch(function(error) {{
+                        console.error('Error cargando el PDF:', error);
+                    }});
+                </script>
+            </body>
+            </html>
         '''
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        components.html(pdf_js_html, height=660)
     except Exception as e:
         st.error(f"Error al desplegar el PDF: {e}")
 
