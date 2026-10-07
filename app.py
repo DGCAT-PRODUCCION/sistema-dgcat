@@ -83,7 +83,7 @@ _MESES_ES = {
 }
 
 def render_visor_pdf_antibloqueo(ruta_pdf):
-    """Renderiza el PDF usando PDF.js para evitar bloqueos de seguridad en Edge/Chrome."""
+    """Renderiza el PDF usando PDF.js permitiendo rotar las páginas (girar el archivo)."""
     try:
         if not os.path.exists(ruta_pdf):
             st.error("El archivo PDF no existe en el servidor.")
@@ -91,43 +91,86 @@ def render_visor_pdf_antibloqueo(ruta_pdf):
         with open(ruta_pdf, "rb") as f:
             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
         
-        # Oipuru PDF.js CDN ikatu hag̃uáicha ohechauka PDF oimeraẽva navegador-pe
         pdf_js_html = f'''
             <!DOCTYPE html>
             <html>
             <head>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
                 <style>
+                    body {{
+                        margin: 0;
+                        padding: 0;
+                        font-family: Arial, sans-serif;
+                        background-color: #323639;
+                    }}
+                    #toolbar {{
+                        background-color: #222;
+                        color: white;
+                        padding: 8px 15px;
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                        position: sticky;
+                        top: 0;
+                        z-index: 100;
+                    }}
+                    .btn-rotate {{
+                        background-color: #047857;
+                        color: white;
+                        border: none;
+                        padding: 6px 12px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-weight: bold;
+                        font-size: 13px;
+                        display: flex;
+                        align-items: center;
+                        gap: 5px;
+                    }}
+                    .btn-rotate:hover {{
+                        background-color: #065f46;
+                    }}
                     #pdf-container {{
                         width: 100%;
-                        height: 650px;
+                        height: 600px;
                         overflow: auto;
-                        background-color: #525659;
                         display: flex;
                         flex-direction: column;
                         align-items: center;
-                        padding: 10px 0;
+                        padding: 15px 0;
                     }}
                     canvas {{
-                        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-                        margin-bottom: 10px;
-                        max-width: 98%;
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+                        margin-bottom: 15px;
+                        max-width: 95%;
                     }}
                 </style>
             </head>
-            <body style="margin:0; padding:0;">
+            <body>
+                <div id="toolbar">
+                    <span>🔄 Rotar documento:</span>
+                    <button class="btn-rotate" onclick="rotatePDF(-90)">↺ Girar Izquierda (90°)</button>
+                    <button class="btn-rotate" onclick="rotatePDF(90)">↻ Girar Derecha (90°)</button>
+                </div>
                 <div id="pdf-container"></div>
+
                 <script>
                     const pdfData = atob("{base64_pdf}");
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-                    const loadingTask = pdfjsLib.getDocument({{data: pdfData}});
-                    loadingTask.promise.then(function(pdf) {{
+                    let currentRotation = 0;
+                    let pdfDoc = null;
+
+                    function renderAllPages() {{
                         const container = document.getElementById('pdf-container');
-                        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {{
-                            pdf.getPage(pageNum).then(function(page) {{
-                                const scale = 1.3;
-                                const viewport = page.getViewport({{scale: scale}});
+                        container.innerHTML = ''; // Limpiar lienzo anterior
+
+                        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {{
+                            pdfDoc.getPage(pageNum).then(function(page) {{
+                                const scale = 1.2;
+                                // Aplicar rotación
+                                const viewport = page.getViewport({{scale: scale, rotation: currentRotation}});
                                 const canvas = document.createElement('canvas');
                                 const context = canvas.getContext('2d');
                                 canvas.height = viewport.height;
@@ -141,6 +184,20 @@ def render_visor_pdf_antibloqueo(ruta_pdf):
                                 page.render(renderContext);
                             }});
                         }}
+                    }}
+
+                    function rotatePDF(degrees) {{
+                        currentRotation = (currentRotation + degrees) % 360;
+                        if (currentRotation < 0) currentRotation += 360;
+                        if (pdfDoc) {{
+                            renderAllPages();
+                        }}
+                    }}
+
+                    const loadingTask = pdfjsLib.getDocument({{data: pdfData}});
+                    loadingTask.promise.then(function(pdf) {{
+                        pdfDoc = pdf;
+                        renderAllPages();
                     }}).catch(function(error) {{
                         console.error('Error cargando el PDF:', error);
                     }});
@@ -148,7 +205,7 @@ def render_visor_pdf_antibloqueo(ruta_pdf):
             </body>
             </html>
         '''
-        components.html(pdf_js_html, height=660)
+        components.html(pdf_js_html, height=670)
     except Exception as e:
         st.error(f"Error al desplegar el PDF: {e}")
 
@@ -184,10 +241,9 @@ def render_documentos_adicionales(modulo, registro_id, key_prefix):
                 else:
                     st.error(msg)
 
+        # Despliega el visor con capacidad de giro para el archivo adicional
         if adj_bytes is not None and st.session_state.get(ver_key, False):
-            # Oipuru pe función pyahu render_visor_pdf_antibloqueo ohechauka hag̃ua pe PDF adicional
             render_visor_pdf_antibloqueo(adj_ruta)
-
 def flash(tipo, mensaje):
     st.session_state.setdefault("_flash", []).append((tipo, mensaje))
 
