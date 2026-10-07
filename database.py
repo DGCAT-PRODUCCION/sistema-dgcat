@@ -820,21 +820,22 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
     chart_directiva.height = 9
     ws_sum.add_chart(chart_directiva, "D4")
 
-    headers_completos = [
+    # Inclusión de columna consecutiva #
+    headers_base = [
         "ID", "ID REGISTRO", "ESTADO", "MUNICIPIO", "EJIDO", 
         "NO. OFICIO", "DGCAT", "FECHA ENTREGA", "FECHA RECIBIDO", 
         "SCG", "SISCAT", "SISTEMAS/OR", "TIPO TRÁMITE", "OBSERVACIONES", "ARCHIVO ESCANEADO"
     ]
-    cols_df_completos = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
+    cols_df_base = ['id', 'id_registro', 'estado', 'municipio', 'ejido', 'no_oficio', 'dgcat', 'fecha_entrega', 'fecha_recibido', 'scg', 'siscat', 'sistemas_or', 'tipo_tramite', 'observaciones', 'archivo_escaneado']
 
     if mostrar_id:
-        headers = headers_completos
-        cols_df = cols_df_completos
+        headers = ["#"] + headers_base
+        cols_df = cols_df_base
     else:
-        headers = [h for h in headers_completos if h != "ID"]
-        cols_df = [c for c in cols_df_completos if c != "id"]
+        headers = ["#"] + [h for h in headers_base if h != "ID"]
+        cols_df = [c for c in cols_df_base if c != "id"]
 
-    HEADERS_CENTRADOS = {"ID", "ID REGISTRO", "FECHA ENTREGA", "FECHA RECIBIDO", "SCG", "SISCAT", "SISTEMAS/OR"}
+    HEADERS_CENTRADOS = {"#", "ID", "ID REGISTRO", "FECHA ENTREGA", "FECHA RECIBIDO", "SCG", "SISCAT", "SISTEMAS/OR"}
 
     ws_det.append(headers)
     for col_num in range(1, len(headers) + 1):
@@ -849,7 +850,9 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
         df_detalle = df_upper.reset_index(drop=True)
 
     for row_idx, row in df_detalle.iterrows():
-        row_data = [str(row.get(c, '')).upper() if pd.notna(row.get(c, '')) else '' for c in cols_df]
+        # Consecutivo de 1 a N
+        consecutivo = row_idx + 1
+        row_data = [consecutivo] + [str(row.get(c, '')).upper() if pd.notna(row.get(c, '')) else '' for c in cols_df]
         ws_det.append(row_data)
         
         current_row = row_idx + 2
@@ -880,6 +883,7 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
 
     wb.save(filename)
     return filename
+
 
 # -----------------------------------------------------------------------------
 # REPORTE EJECUTIVO EXCEL - SEGUIMIENTO DE UBICACIÓN DE PREDIO
@@ -958,15 +962,18 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
     chart_seg.height = 9
     ws_sum.add_chart(chart_seg, "D4")
 
-    headers_completos = ["ID", "DGCAT/FOLIO", "ESTADO", "MUNICIPIO", "EJIDO", "FECHA REGISTRO", "OBSERVACIONES", "ARCHIVO ESCANEADO", "REGISTRADO POR"]
-    cols_df_completos = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'observaciones', 'archivo_escaneado', 'registrado_por']
+    # Inclusión de columna consecutiva #
+    headers_base = ["ID", "DGCAT/FOLIO", "ESTADO", "MUNICIPIO", "EJIDO", "FECHA REGISTRO", "OBSERVACIONES", "ARCHIVO ESCANEADO", "REGISTRADO POR"]
+    cols_df_base = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'observaciones', 'archivo_escaneado', 'registrado_por']
 
     if mostrar_id:
-        headers = headers_completos
-        cols_df = cols_df_completos
+        headers = ["#"] + headers_base
+        cols_df = cols_df_base
     else:
-        headers = [h for h in headers_completos if h != "ID"]
-        cols_df = [c for c in cols_df_completos if c != "id"]
+        headers = ["#"] + [h for h in headers_base if h != "ID"]
+        cols_df = [c for c in cols_df_base if c != "id"]
+
+    HEADERS_CENTRADOS = {"#", "ID", "FECHA REGISTRO"}
 
     ws_det.append(headers)
     for col_num in range(1, len(headers) + 1):
@@ -981,16 +988,24 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
         df_detalle = df_upper.reset_index(drop=True)
 
     for row_idx, row in df_detalle.iterrows():
-        row_data = [str(row.get(c, '')).upper() if pd.notna(row.get(c, '')) else '' for c in cols_df]
+        # Consecutivo de 1 a N
+        consecutivo = row_idx + 1
+        row_data = [consecutivo] + [str(row.get(c, '')).upper() if pd.notna(row.get(c, '')) else '' for c in cols_df]
         ws_det.append(row_data)
+        
         current_row = row_idx + 2
         is_zebra = (row_idx % 2 == 1)
-        for col_idx in range(1, len(headers) + 1):
+        for col_idx, header_nombre in enumerate(headers, start=1):
             cell = ws_det.cell(row=current_row, column=col_idx)
             cell.font = font_regular
             cell.border = border_box
             if is_zebra:
                 cell.fill = fill_zebra
+            
+            if header_nombre in HEADERS_CENTRADOS:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                cell.alignment = Alignment(horizontal="left", vertical="center")
 
     for ws in [ws_sum, ws_det]:
         for col in ws.columns:
