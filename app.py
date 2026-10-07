@@ -688,7 +688,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
-                    # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # 3. REGISTRO COMPLETO DE OFICIOS (Continuación)
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
