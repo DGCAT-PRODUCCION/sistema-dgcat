@@ -185,6 +185,7 @@ def render_documentos_adicionales(modulo, registro_id, key_prefix):
                     st.error(msg)
 
         if adj_bytes is not None and st.session_state.get(ver_key, False):
+            # Oipuru pe función pyahu render_visor_pdf_antibloqueo ohechauka hag̃ua pe PDF adicional
             render_visor_pdf_antibloqueo(adj_ruta)
 
 def flash(tipo, mensaje):
