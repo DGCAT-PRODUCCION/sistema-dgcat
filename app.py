@@ -739,6 +739,13 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
     dgcat_folio = st.text_input("Folio DGCAT *", value=val_dgcat_seg, key=f"dgcat_seg_{contexto_key_seg}")
     dgcat_check = dgcat_folio.strip().upper()
 
+    # VALIDACIÓN EN TIEMPO REAL DEL FOLIO DGCAT
+    folio_bloqueado_seg = False
+    if modo_seg == "➕ Nuevo Registro" and dgcat_check and dgcat_check != "DGCAT/100/":
+        if existe_folio_seguimiento(dgcat_check):
+            st.error(f"⚠️ El folio **{dgcat_check}** ya se encuentra registrado en Seguimiento de Ubicación de Predio. Ingrese un folio diferente.")
+            folio_bloqueado_seg = True
+
     val_obs_seg = str(seg_sel['observaciones']) if (seg_sel is not None and pd.notna(seg_sel['observaciones'])) else ""
 
     with st.form(f"form_seguimiento_predio_{contexto_key_seg}", clear_on_submit=True):
@@ -751,7 +758,9 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 
         btn_label_seg = "📤 Guardar Seguimiento de Predio" if modo_seg == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label_seg, type="primary"):
-            if not es_oficinas_centrales and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
+            if folio_bloqueado_seg:
+                st.error("❌ No se puede guardar el registro porque el folio DGCAT ya existe en la base de datos.")
+            elif not es_oficinas_centrales and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido.")
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
@@ -797,7 +806,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                 else:
                     st.error(f"❌ {msg}")
 # -----------------------------------------------------------------------------
-# 3. REGISTRO COMPLETO DE OFICIOS (Continuación)
+# 3. REGISTRO COMPLETO DE OFICIOS
 # -----------------------------------------------------------------------------
 elif menu == "📝 Registro Completo de Oficios":
     st.title("📝 Registro y Edición Avanzada de Oficios")
@@ -910,6 +919,13 @@ elif menu == "📝 Registro Completo de Oficios":
     dgcat_folio = st.text_input("Folio DGCAT", value=val_dgcat, key=f"dgcat_folio_{contexto_key}")
     dgcat_check = dgcat_folio.strip().upper()
 
+    # VALIDACIÓN EN TIEMPO REAL DEL FOLIO DGCAT
+    folio_bloqueado_oficio = False
+    if modo_accion == "➕ Nuevo Registro" and dgcat_check and dgcat_check != "DGCAT/100/":
+        if existe_folio_oficio(dgcat_check):
+            st.error(f"⚠️ El folio **{dgcat_check}** ya existe en el Registro Completo de Oficios. Verifique el número de folio.")
+            folio_bloqueado_oficio = True
+
     scg_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_scg ORDER BY nombre", engine)['nombre'].tolist()
     siscat_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_siscat ORDER BY nombre", engine)['nombre'].tolist()
     sistemas_or_options = ["-- Seleccione --"] + pd.read_sql("SELECT nombre FROM cat_sistemas_or ORDER BY nombre", engine)['nombre'].tolist()
@@ -955,7 +971,9 @@ elif menu == "📝 Registro Completo de Oficios":
 
         btn_label = "💾 Guardar Registro" if modo_accion == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label, type="primary"):
-            if not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
+            if folio_bloqueado_oficio:
+                st.error("❌ No se puede guardar el registro porque el folio DGCAT ya existe en la base de datos.")
+            elif not es_oficinas_centrales_admin and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido.")
             elif not dgcat_check or dgcat_check == "DGCAT/100/":
                 st.error("⚠️ Debe ingresar un folio DGCAT completo.")
