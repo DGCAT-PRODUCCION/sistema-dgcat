@@ -625,7 +625,6 @@ if menu == "📈 Dashboard Ejecutivo":
             paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF", font_color="#1F2937"
         )
         st.plotly_chart(fig_tramite_bar, use_container_width=True)
-
 # -----------------------------------------------------------------------------
 # 2. SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
@@ -648,7 +647,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
     cnt_s = st.session_state["reset_count_seg"]
 
     texto_busqueda_seg = st.text_input(
-        "🔎 Buscar por folio DGCAT, Estado o Municipio (opcional):",
+        "🔎 Buscar por folio DCR, Estado o Municipio (opcional):",
         key=f"buscar_seg_{modo_seg}_{cnt_s}"
     )
     df_busqueda_seg = df_seg_todo
@@ -680,7 +679,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
         conteo_rep_seg = {}
         etiquetas_seg_sel = []
         for _, fila_tmp in df_busqueda_seg.iterrows():
-            base = f"Folio: {str(fila_tmp['dgcat']).upper()} | {str(fila_tmp['estado']).upper()}"
+            base = f"Folio DCR: {str(fila_tmp['dgcat']).upper()} | {str(fila_tmp['estado']).upper()}"
             conteo_rep_seg[base] = conteo_rep_seg.get(base, 0) + 1
             etiquetas_seg_sel.append(base + (f" ({conteo_rep_seg[base]})" if conteo_rep_seg[base] > 1 else ""))
         df_busqueda_seg['display_name'] = etiquetas_seg_sel
@@ -735,20 +734,48 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
             ejido_sel = st.selectbox("3. Ejido *", ["-- Seleccione --"] + ejidos_list, index=def_ejido_idx_seg, key=f"ejido_seg_{contexto_key_seg}")
 
     st.markdown("---")
-    val_dgcat_seg = str(seg_sel['dgcat']) if (seg_sel is not None and pd.notna(seg_sel['dgcat'])) else "DGCAT/100/"
-    dgcat_folio = st.text_input("Folio DGCAT *", value=val_dgcat_seg, key=f"dgcat_seg_{contexto_key_seg}")
+    
+    # Titulo de campo cambiado a Folio DCR *
+    val_dgcat_seg = str(seg_sel['dgcat']) if (seg_sel is not None and pd.notna(seg_sel['dgcat'])) else "DCR/100/"
+    dgcat_folio = st.text_input("Folio DCR *", value=val_dgcat_seg, key=f"dgcat_seg_{contexto_key_seg}")
     dgcat_check = dgcat_folio.strip().upper()
 
-    # VALIDACIÓN EN TIEMPO REAL DEL FOLIO DGCAT
+    # VALIDACIÓN EN TIEMPO REAL
     folio_bloqueado_seg = False
-    if modo_seg == "➕ Nuevo Registro" and dgcat_check and dgcat_check != "DGCAT/100/":
+    if modo_seg == "➕ Nuevo Registro" and dgcat_check and dgcat_check != "DCR/100/":
         if existe_folio_seguimiento(dgcat_check):
-            st.error(f"⚠️ El folio **{dgcat_check}** ya se encuentra registrado en Seguimiento de Ubicación de Predio. Ingrese un folio diferente.")
+            st.error(f"⚠️ El folio **{dgcat_check}** ya se encuentra registrado. Ingrese un folio diferente.")
             folio_bloqueado_seg = True
 
+    # Función auxiliar para manejo de fechas
+    def _parse_fecha_seg(valor):
+        if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+            return date.today()
+        s = str(valor).strip()
+        if not s or s.upper() in ('NONE', 'NAN', ''):
+            return date.today()
+        try:
+            return datetime.strptime(s, '%d/%m/%Y').date()
+        except Exception:
+            return date.today()
+
+    val_no_oficialia_oc = str(seg_sel['no_oficialia_oc']) if (seg_sel is not None and pd.notna(seg_sel.get('no_oficialia_oc'))) else ""
+    val_f_entrega_oc = _parse_fecha_seg(seg_sel.get('fecha_entrega_oc')) if seg_sel is not None else date.today()
+    val_f_dcr = _parse_fecha_seg(seg_sel.get('fecha_dcr')) if seg_sel is not None else date.today()
     val_obs_seg = str(seg_sel['observaciones']) if (seg_sel is not None and pd.notna(seg_sel['observaciones'])) else ""
 
+    RANGO_FECHA_MIN = date(2000, 1, 1)
+    RANGO_FECHA_MAX = date(2030, 12, 31)
+
     with st.form(f"form_seguimiento_predio_{contexto_key_seg}", clear_on_submit=True):
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            no_oficialia_oc = st.text_input("No. Oficialía de Partes OC", value=val_no_oficialia_oc, key=f"no_oficialia_oc_{contexto_key_seg}")
+        with col_f2:
+            f_entrega_oc = st.date_input("Fecha de Entrega de Oficialía de Partes OC", value=val_f_entrega_oc, min_value=RANGO_FECHA_MIN, max_value=RANGO_FECHA_MAX, format="DD/MM/YYYY", key=f"f_entrega_oc_{contexto_key_seg}")
+        with col_f3:
+            f_dcr = st.date_input("Fecha de la DCR", value=val_f_dcr, min_value=RANGO_FECHA_MIN, max_value=RANGO_FECHA_MAX, format="DD/MM/YYYY", key=f"f_dcr_{contexto_key_seg}")
+
         archivo_escaneado = st.file_uploader(
             "Adjuntar/Reemplazar Expediente Escaneado (PDF)" + (" *" if modo_seg == "➕ Nuevo Registro" else ""),
             type=["pdf"],
@@ -759,11 +786,11 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
         btn_label_seg = "📤 Guardar Seguimiento de Predio" if modo_seg == "➕ Nuevo Registro" else "✏️ Guardar Cambios"
         if st.form_submit_button(btn_label_seg, type="primary"):
             if folio_bloqueado_seg:
-                st.error("❌ No se puede guardar el registro porque el folio DGCAT ya existe en la base de datos.")
+                st.error("❌ No se puede guardar el registro porque el folio DCR ya existe en la base de datos.")
             elif not es_oficinas_centrales and (estado_sel == "-- Seleccione --" or municipio_sel == "-- Seleccione --" or ejido_sel == "-- Seleccione --"):
                 st.error("⚠️ Debe seleccionar Estado, Municipio y Ejido.")
-            elif not dgcat_check or dgcat_check == "DGCAT/100/":
-                st.error("⚠️ Debe ingresar un folio DGCAT completo.")
+            elif not dgcat_check or dgcat_check == "DCR/100/":
+                st.error("⚠️ Debe ingresar un folio DCR completo.")
             elif archivo_escaneado is None and modo_seg == "➕ Nuevo Registro":
                 st.error("⚠️ Debe adjuntar un archivo PDF escaneado.")
             elif archivo_escaneado is not None and not es_pdf_valido(archivo_escaneado.getvalue())[0]:
@@ -774,6 +801,9 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                 estado_upper = estado_sel.strip().upper()
                 municipio_upper = municipio_sel.strip().upper()
                 ejido_upper = ejido_sel.strip().upper()
+                no_oficialia_oc_upper = no_oficialia_oc.strip().upper()
+                str_f_entrega_oc = f_entrega_oc.strftime('%d/%m/%Y')
+                str_f_dcr = f_dcr.strftime('%d/%m/%Y')
                 fecha_hoy = date.today().strftime('%d/%m/%Y')
 
                 nombre_archivo = None
@@ -784,14 +814,24 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                         f.write(archivo_escaneado.getbuffer())
 
                 datos = {
-                    "dgcat": dgcat_check, "estado": estado_upper, "municipio": municipio_upper,
-                    "ejido": ejido_upper, "observaciones": obs_upper,
+                    "dgcat": dgcat_check, 
+                    "estado": estado_upper, 
+                    "municipio": municipio_upper,
+                    "ejido": ejido_upper, 
+                    "no_oficialia_oc": no_oficialia_oc_upper,
+                    "fecha_entrega_oc": str_f_entrega_oc,
+                    "fecha_dcr": str_f_dcr,
+                    "observaciones": obs_upper,
                     "registrado_por": st.session_state["username"],
                 }
+
                 if modo_seg == "✏️ Modificar Registro Existente" and seg_sel is not None:
                     datos["fecha_actualizacion"] = fecha_hoy
                     if nombre_archivo:
                         datos["archivo_escaneado"] = nombre_archivo
+                    else:
+                        datos["archivo_escaneado"] = seg_sel.get('archivo_escaneado', '')
+
                     ok, msg = guardar_seguimiento_predio(datos, id_registro=int(seg_sel['id']), usuario=st.session_state["username"])
                 else:
                     datos["fecha_registro"] = fecha_hoy
