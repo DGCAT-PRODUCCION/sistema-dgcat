@@ -23,7 +23,7 @@ def mostrar_pdf(ruta_pdf):
     evitando que Microsoft Edge o Chrome lo bloqueen como elemento inseguro.
     """
     if not os.path.exists(ruta_pdf):
-        st.warning("⚠️️ El archivo PDF físico no se encuentra en el servidor.")
+        st.warning("⚠ El archivo PDF físico no se encuentra en el servidor.")
         return
 
     try:
@@ -222,6 +222,9 @@ def init_db():
                         estado TEXT,
                         municipio TEXT,
                         ejido TEXT,
+                        no_oficialia_oc TEXT,
+                        fecha_entrega_oc TEXT,
+                        fecha_dcr TEXT,
                         fecha_registro TEXT,
                         fecha_actualizacion TEXT,
                         observaciones TEXT,
@@ -239,6 +242,9 @@ def init_db():
                         estado TEXT,
                         municipio TEXT,
                         ejido TEXT,
+                        no_oficialia_oc TEXT,
+                        fecha_entrega_oc TEXT,
+                        fecha_dcr TEXT,
                         fecha_registro TEXT,
                         fecha_actualizacion TEXT,
                         observaciones TEXT,
@@ -310,6 +316,9 @@ def init_db():
                 ("oficios", "fecha_creacion", "TEXT"),
                 ("oficios", "actualizado_por", "TEXT"),
                 ("oficios", "fecha_actualizacion", "TEXT"),
+                ("seguimiento_predio", "no_oficialia_oc", "TEXT"),
+                ("seguimiento_predio", "fecha_entrega_oc", "TEXT"),
+                ("seguimiento_predio", "fecha_dcr", "TEXT"),
                 ("seguimiento_predio", "creado_por", "TEXT"),
                 ("seguimiento_predio", "actualizado_por", "TEXT"),
                 ("archivos_adjuntos", "nombre_original", "TEXT"),
@@ -564,7 +573,7 @@ def guardar_seguimiento_predio(datos, id_registro=None, usuario=None):
         st.cache_data.clear()
         accion = "MODIFICAR" if id_registro else "CREAR"
         rid = int(id_registro) if id_registro else nuevo_id
-        detalle = f"Folio: {datos.get('dgcat', '')}, Estado: {datos.get('estado', '')}"
+        detalle = f"Folio DCR: {datos.get('dgcat', '')}, Estado: {datos.get('estado', '')}"
         registrar_auditoria("seguimiento_predio", rid, accion, usuario, detalle)
         return True, "Registro de seguimiento guardado correctamente."
     except Exception as e:
@@ -577,7 +586,7 @@ def eliminar_seguimiento_predio(id_registro, usuario=None):
             fila = conn.execute(text("SELECT dgcat, estado FROM seguimiento_predio WHERE id = :id"), {"id": int(id_registro)}).fetchone()
             conn.execute(text("DELETE FROM seguimiento_predio WHERE id = :id"), {"id": int(id_registro)})
         st.cache_data.clear()
-        detalle = f"Folio: {fila[0]}, Estado: {fila[1]}" if fila else ""
+        detalle = f"Folio DCR: {fila[0]}, Estado: {fila[1]}" if fila else ""
         registrar_auditoria("seguimiento_predio", id_registro, "ELIMINAR", usuario, detalle)
         return True, f"Registro de seguimiento ID #{id_registro} eliminado."
     except Exception as e:
@@ -884,7 +893,6 @@ def generar_excel_ejecutivo(df, filename="Reporte_DGCAT_Ejecutivo.xlsx", mostrar
     wb.save(filename)
     return filename
 
-
 # -----------------------------------------------------------------------------
 # REPORTE EJECUTIVO EXCEL - SEGUIMIENTO DE UBICACIÓN DE PREDIO
 # -----------------------------------------------------------------------------
@@ -962,9 +970,9 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
     chart_seg.height = 9
     ws_sum.add_chart(chart_seg, "D4")
 
-    # Inclusión de columna consecutiva #
-    headers_base = ["ID", "DGCAT/FOLIO", "ESTADO", "MUNICIPIO", "EJIDO", "FECHA REGISTRO", "OBSERVACIONES", "ARCHIVO ESCANEADO", "REGISTRADO POR"]
-    cols_df_base = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'fecha_registro', 'observaciones', 'archivo_escaneado', 'registrado_por']
+    # Inclusión de columna consecutiva # y actualización de headers para Seguimiento
+    headers_base = ["ID", "FOLIO DCR", "ESTADO", "MUNICIPIO", "EJIDO", "NO. OFICIALIA OC", "FECHA ENTREGA OC", "FECHA DCR", "FECHA REGISTRO", "OBSERVACIONES", "ARCHIVO ESCANEADO", "REGISTRADO POR"]
+    cols_df_base = ['id', 'dgcat', 'estado', 'municipio', 'ejido', 'no_oficialia_oc', 'fecha_entrega_oc', 'fecha_dcr', 'fecha_registro', 'observaciones', 'archivo_escaneado', 'registrado_por']
 
     if mostrar_id:
         headers = ["#"] + headers_base
@@ -973,7 +981,7 @@ def generar_excel_seguimiento(df, filename="Reporte_Seguimiento_Predio.xlsx", mo
         headers = ["#"] + [h for h in headers_base if h != "ID"]
         cols_df = [c for c in cols_df_base if c != "id"]
 
-    HEADERS_CENTRADOS = {"#", "ID", "FECHA REGISTRO"}
+    HEADERS_CENTRADOS = {"#", "ID", "NO. OFICIALIA OC", "FECHA ENTREGA OC", "FECHA DCR", "FECHA REGISTRO"}
 
     ws_det.append(headers)
     for col_num in range(1, len(headers) + 1):
