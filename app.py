@@ -735,7 +735,6 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
 
     st.markdown("---")
     
-    # Titulo de campo cambiado a Folio DCR *
     val_dgcat_seg = str(seg_sel['dgcat']) if (seg_sel is not None and pd.notna(seg_sel['dgcat'])) else "DCR/100/"
     dgcat_folio = st.text_input("Folio DCR *", value=val_dgcat_seg, key=f"dgcat_seg_{contexto_key_seg}")
     dgcat_check = dgcat_folio.strip().upper()
@@ -747,7 +746,6 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
             st.error(f"⚠️ El folio **{dgcat_check}** ya se encuentra registrado. Ingrese un folio diferente.")
             folio_bloqueado_seg = True
 
-    # Función auxiliar para manejo de fechas
     def _parse_fecha_seg(valor):
         if valor is None or (isinstance(valor, float) and pd.isna(valor)):
             return date.today()
@@ -813,7 +811,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     with open(os.path.join(UPLOADS_DIR, nombre_archivo), "wb") as f:
                         f.write(archivo_escaneado.getbuffer())
 
-                datos = {
+                datos_form_seg = {
                     "dgcat": dgcat_check, 
                     "estado": estado_upper, 
                     "municipio": municipio_upper,
@@ -826,14 +824,23 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                 }
 
                 if modo_seg == "✏️ Modificar Registro Existente" and seg_sel is not None:
+                    # 🔒 FUSIÓN DE DATOS: Conservar absolutamente todo lo que existía en DB
+                    datos = seg_sel.to_dict()
+                    datos.update(datos_form_seg)
                     datos["fecha_actualizacion"] = fecha_hoy
+                    datos["actualizado_por"] = st.session_state["username"]
+
+                    # 🔒 CONSERVAR PDF PREVIO SI NO SE SUBIÓ UNO NUEVO
                     if nombre_archivo:
                         datos["archivo_escaneado"] = nombre_archivo
                     else:
-                        datos["archivo_escaneado"] = seg_sel.get('archivo_escaneado', '')
+                        datos["archivo_escaneado"] = str(seg_sel.get('archivo_escaneado', '') or '')
+
+                    datos.pop('id', None)
 
                     ok, msg = guardar_seguimiento_predio(datos, id_registro=int(seg_sel['id']), usuario=st.session_state["username"])
                 else:
+                    datos = datos_form_seg
                     datos["fecha_registro"] = fecha_hoy
                     datos["fecha_actualizacion"] = fecha_hoy
                     datos["archivo_escaneado"] = nombre_archivo or ""
@@ -845,6 +852,7 @@ elif menu == "📍 Seguimiento de Ubicación de Predio":
                     st.rerun()
                 else:
                     st.error(f"❌ {msg}")
+
 # -----------------------------------------------------------------------------
 # 3. REGISTRO COMPLETO DE OFICIOS
 # -----------------------------------------------------------------------------
@@ -1048,18 +1056,38 @@ elif menu == "📝 Registro Completo de Oficios":
                     with open(os.path.join(UPLOADS_DIR, archivo_final), "wb") as f:
                         f.write(archivo_nuevo.getbuffer())
 
-                datos = {
-                    "id_registro": id_num_upper, "estado": estado_upper, "municipio": municipio_upper,
-                    "ejido": ejido_upper, "no_oficio": no_oficio_upper, "dgcat": dgcat_check,
-                    "fecha_entrega": str_f_entrega, "fecha_recibido": str_f_recibido,
-                    "scg": scg_upper, "siscat": siscat_upper, "sistemas_or": sistemas_or_upper,
-                    "tipo_tramite": tramite_upper, "observaciones": obs_upper,
+                datos_form_oficio = {
+                    "id_registro": id_num_upper, 
+                    "estado": estado_upper, 
+                    "municipio": municipio_upper,
+                    "ejido": ejido_upper, 
+                    "no_oficio": no_oficio_upper, 
+                    "dgcat": dgcat_check,
+                    "fecha_entrega": str_f_entrega, 
+                    "fecha_recibido": str_f_recibido,
+                    "scg": scg_upper, 
+                    "siscat": siscat_upper, 
+                    "sistemas_or": sistemas_or_upper,
+                    "tipo_tramite": tramite_upper, 
+                    "observaciones": obs_upper,
                 }
+
                 if modo_accion == "✏️ Modificar Registro Existente" and oficio_sel is not None:
+                    # 🔒 FUSIÓN DE DATOS: Conservar datos de DB que no estén en el formulario
+                    datos = oficio_sel.to_dict()
+                    datos.update(datos_form_oficio)
+
+                    # 🔒 CONSERVAR PDF PREVIO SI NO SE SUBIÓ UNO NUEVO
                     if archivo_final:
                         datos["archivo_escaneado"] = archivo_final
+                    else:
+                        datos["archivo_escaneado"] = str(oficio_sel.get('archivo_escaneado', '') or '')
+
+                    datos.pop('id', None)
+
                     ok, msg = guardar_oficio(datos, id_oficio=int(oficio_sel['id']), usuario=st.session_state["username"])
                 else:
+                    datos = datos_form_oficio
                     datos["archivo_escaneado"] = archivo_final
                     ok, msg = guardar_oficio(datos, usuario=st.session_state["username"])
 
